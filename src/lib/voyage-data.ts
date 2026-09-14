@@ -464,6 +464,7 @@ export function formatPrice(value: number) {
 export function calculateNights(startDate: string, endDate: string) {
   const start = new Date(`${startDate}T00:00:00Z`).getTime();
   const end = new Date(`${endDate}T00:00:00Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
   return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
