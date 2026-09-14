@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CloseIcon, MicIcon } from "@/components/icons"
 import { useVoyage } from "@/components/voyage-provider"
@@ -9,6 +9,8 @@ import type { AgentMessage, AgentTool, AgentResponse } from "@/lib/agent-types"
 import type { BookingRecord } from "@/lib/booking-types"
 import { formatDateRange, formatPrice } from "@/lib/voyage-data"
 import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
+
+const maxAgentTurns = 12
 
 export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const [agentOpen, setAgentOpen] = useState(false)
@@ -89,6 +91,7 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [cancellationSummary, setCancellationSummary] = useState<BookingRecord | null>(null)
   const { state } = useVoyage()
+  const router = useRouter()
 
   useEffect(() => {
     if (!open) return
@@ -147,7 +150,7 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         { role: "user", content: trimmed },
       ]
 
-      for (let turn = 0; turn < 5; turn += 1) {
+      for (let turn = 0; turn < maxAgentTurns; turn += 1) {
         const assistantMessage = await requestAgent(messages, tools)
         messages = [...messages, assistantMessage]
         setAgentMessages(messages)
@@ -209,7 +212,7 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         setAgentMessages(messages)
       }
 
-      throw new Error("The agent reached its tool-call limit.")
+      throw new Error(`The agent reached its ${maxAgentTurns}-step tool-call limit.`)
     } catch (error: unknown) {
       setConversation((current) => [
         ...current,
@@ -243,6 +246,8 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         ...current,
         { role: "assistant", content: `Your journey is confirmed${result.booking?.reference ? ` · ${result.booking.reference}` : "."}` },
       ])
+      onClose()
+      router.push("/trips")
     } catch (error: unknown) {
       setBookingError(error instanceof Error ? error.message : "The booking could not be completed.")
     } finally {
@@ -276,6 +281,8 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         ...current,
         { role: "assistant", content: `Your booking has been cancelled${result.booking?.reference ? ` · ${result.booking.reference}` : "."}` },
       ])
+      onClose()
+      router.push("/trips")
     } catch (error: unknown) {
       setBookingError(error instanceof Error ? error.message : "The booking could not be cancelled.")
     } finally {
