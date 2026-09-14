@@ -69,9 +69,105 @@ export const destinations: Destination[] = [
     description: "Tropical gardens, brilliant food, and a strikingly contemporary skyline.",
     image: "https://images.unsplash.com/photo-1628221680019-f28a2716e727?w=600&h=800&fit=crop&auto=format",
   },
+  {
+    id: "rome",
+    name: "Rome",
+    country: "Italy",
+    tagline: "Eternal beauty",
+    description: "Ancient stones, late dinners, and a city that rewards wandering without a plan.",
+    image: "https://images.unsplash.com/photo-1529260830199-42c24126f198?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "istanbul",
+    name: "Istanbul",
+    country: "Türkiye",
+    tagline: "Where worlds meet",
+    description: "A city of ferries, domes, spice markets, and two continents joined by water.",
+    image: "https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "new-york",
+    name: "New York",
+    country: "United States",
+    tagline: "Always in motion",
+    description: "A restless, generous city of neighbourhoods, galleries, and unforgettable meals.",
+    image: "https://images.unsplash.com/photo-1496588152823-86ff7695e68f?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "barcelona",
+    name: "Barcelona",
+    country: "Spain",
+    tagline: "Mediterranean rhythm",
+    description: "Modernist architecture, long lunches, and the blue edge of the Mediterranean.",
+    image: "https://images.unsplash.com/photo-1539037116277-4db20889f2d4?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "lisbon",
+    name: "Lisbon",
+    country: "Portugal",
+    tagline: "Light on the hills",
+    description: "Tile-lined streets, Atlantic air, and a warm city made for slow afternoons.",
+    image: "https://images.unsplash.com/photo-1555881400-74d7acaacb023?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "cape-town",
+    name: "Cape Town",
+    country: "South Africa",
+    tagline: "Between mountain and sea",
+    description: "A dramatic coastline, vineyard roads, and Table Mountain above it all.",
+    image: "https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "bali",
+    name: "Bali",
+    country: "Indonesia",
+    tagline: "Island stillness",
+    description: "Rice terraces, warm water, and a deep sense of craft in every detail.",
+    image: "https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "amsterdam",
+    name: "Amsterdam",
+    country: "Netherlands",
+    tagline: "Canals and quiet corners",
+    description: "Golden canal houses, world-class art, and an easy pace on two wheels.",
+    image: "https://images.unsplash.com/photo-1534351590666-13e3e96b5017?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "marrakech",
+    name: "Marrakech",
+    country: "Morocco",
+    tagline: "A city of colour",
+    description: "Rose-walled riads, fragrant courtyards, and the Atlas Mountains beyond.",
+    image: "https://images.unsplash.com/photo-1597212618440-806262de4f6b?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "vienna",
+    name: "Vienna",
+    country: "Austria",
+    tagline: "Elegant by nature",
+    description: "Imperial architecture, coffeehouse rituals, and a city with a composed soul.",
+    image: "https://images.unsplash.com/photo-1516550893923-42d28e5677af?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "sydney",
+    name: "Sydney",
+    country: "Australia",
+    tagline: "Harbour light",
+    description: "Brilliant coves, long coastal walks, and a city built around the water.",
+    image: "https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=600&h=800&fit=crop&auto=format",
+  },
+  {
+    id: "seoul",
+    name: "Seoul",
+    country: "South Korea",
+    tagline: "Bright and grounded",
+    description: "Mountain paths, bold design, and a food culture that keeps the city awake.",
+    image: "https://images.unsplash.com/photo-1538485399081-7c897e9e2f9b?w=600&h=800&fit=crop&auto=format",
+  },
 ]
 
-export const hotels: Hotel[] = [
+const parisHotels: Hotel[] = [
   {
     id: "maison-lumiere",
     destinationId: "paris",
@@ -114,7 +210,72 @@ export const hotels: Hotel[] = [
     image: "https://images.unsplash.com/photo-1655516433028-9e0e1599cf8b?w=800&h=540&fit=crop&auto=format",
     detailImages: ["https://images.unsplash.com/photo-1655516433028-9e0e1599cf8b?w=1400&h=700&fit=crop&auto=format"],
   },
+  {
+    id: "rue-cler-rooms",
+    destinationId: "paris",
+    name: "Rue Cler Rooms",
+    stars: 3,
+    location: "Rue Cler",
+    description: "A bright, welcoming base near one of Paris's favourite market streets, with simple rooms and an easy walk to the Seine.",
+    amenities: ["Breakfast available", "Free Wi-Fi", "Market access", "Luggage storage"],
+    pricePerNight: 112,
+    image: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800&h=540&fit=crop&auto=format",
+    detailImages: ["https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1400&h=700&fit=crop&auto=format"],
+  },
+  {
+    id: "montmartre-atelier",
+    destinationId: "paris",
+    name: "Montmartre Atelier",
+    stars: 4,
+    location: "Montmartre",
+    description: "A characterful hillside hotel with a tucked-away courtyard, local art on the walls, and Sacré-Cœur a few streets away.",
+    amenities: ["Breakfast included", "Courtyard garden", "Bar & lounge", "Free Wi-Fi"],
+    pricePerNight: 168,
+    image: "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=800&h=540&fit=crop&auto=format",
+    detailImages: ["https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=1400&h=700&fit=crop&auto=format"],
+  },
 ]
+
+const generatedHotels: Hotel[] = destinations.filter((destination) => destination.id !== "paris").flatMap((destination, index) => [
+  {
+    id: `${destination.id}-house`,
+    destinationId: destination.id,
+    name: `${destination.name} House`,
+    stars: 3,
+    location: `Central ${destination.name}`,
+    description: `A relaxed, well-placed base for discovering ${destination.name}, with comfortable rooms and an easy local rhythm.`,
+    amenities: ["Breakfast available", "Free Wi-Fi", "Luggage storage", "City access"],
+    pricePerNight: 92 + (index % 4) * 8,
+    image: destination.image,
+    detailImages: [destination.image],
+  },
+  {
+    id: `${destination.id}-atelier`,
+    destinationId: destination.id,
+    name: `${destination.name} Atelier`,
+    stars: 4,
+    location: `Old Town ${destination.name}`,
+    description: `A polished boutique stay in the heart of ${destination.name}, balancing local character with the comforts of a thoughtful modern hotel.`,
+    amenities: ["Breakfast included", "Free Wi-Fi", "Fitness room", "Concierge"],
+    pricePerNight: 148 + (index % 4) * 12,
+    image: destination.image,
+    detailImages: [destination.image],
+  },
+  {
+    id: `${destination.id}-grand`,
+    destinationId: destination.id,
+    name: `The Grand ${destination.name}`,
+    stars: 5,
+    location: `Central ${destination.name}`,
+    description: `A full-service stay designed for lingering in ${destination.name}, with generous rooms, calm interiors, and a strong sense of place.`,
+    amenities: ["Breakfast included", "Free Wi-Fi", "Concierge", "Wellness studio", "Rooftop lounge"],
+    pricePerNight: 208 + (index % 4) * 12,
+    image: destination.image,
+    detailImages: [destination.image],
+  },
+])
+
+export const hotels: Hotel[] = [...parisHotels, ...generatedHotels]
 
 export function getDestination(id: string) {
   return destinations.find((destination) => destination.id === id)
@@ -132,4 +293,13 @@ export function calculateNights(startDate: string, endDate: string) {
   const start = new Date(`${startDate}T00:00:00Z`).getTime()
   const end = new Date(`${endDate}T00:00:00Z`).getTime()
   return Math.max(0, Math.round((end - start) / 86_400_000))
+}
+
+export function formatDateRange(startDate: string, endDate: string) {
+  const format = (value: string) => dateFromKey(value).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })
+  return `${format(startDate)} — ${format(endDate)}`
+}
+
+function dateFromKey(value: string) {
+  return new Date(`${value}T00:00:00Z`)
 }

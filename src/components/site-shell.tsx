@@ -4,9 +4,11 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CloseIcon, MicIcon } from "@/components/icons"
+import { useVoyage } from "@/components/voyage-provider"
 
 export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const [agentOpen, setAgentOpen] = useState(false)
+  const { state } = useVoyage()
 
   useEffect(() => {
     const openAgent = () => setAgentOpen(true)
@@ -17,10 +19,15 @@ export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>)
   return (
     <div className="min-h-screen bg-ivory text-charcoal font-sans">
       <SiteHeader onOpenAgent={() => setAgentOpen(true)} />
+      {state.bookedItinerary && <ActiveBookingBanner />}
       <main>{children}</main>
       {agentOpen && <AgentPanel onClose={() => setAgentOpen(false)} />}
     </div>
   )
+}
+
+function ActiveBookingBanner() {
+  return <div className="fixed left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-4 border border-gold/40 bg-ivory px-4 py-2 text-xs text-charcoal shadow-md"><span><span className="mr-1 uppercase tracking-[0.14em] text-gold">Active booking</span> You already have a confirmed itinerary.</span><Link href="/trips" className="font-medium underline underline-offset-4">View My Trips</Link></div>
 }
 
 function SiteHeader({ onOpenAgent }: { onOpenAgent: () => void }) {
@@ -34,13 +41,11 @@ function SiteHeader({ onOpenAgent }: { onOpenAgent: () => void }) {
         <Link href="/" className="font-serif text-xl tracking-[0.22em]">VOYAGE</Link>
 
         <div className="hidden items-center gap-8 text-[13px] tracking-wide md:flex">
-          <NavLink href="/" active={pathname === "/"}>Explore</NavLink>
-          <NavLink href="/stays" active={pathname.startsWith("/stays")}>Stays</NavLink>
-          <NavLink href="/itinerary" active={pathname.startsWith("/itinerary")}>Itinerary</NavLink>
+          <NavLink href="/explore" active={pathname.startsWith("/explore")}>Explore</NavLink>
+          <NavLink href="/trips" active={pathname.startsWith("/trips")}>My Trips</NavLink>
         </div>
 
         <div className="flex items-center gap-4">
-          <Link href="/itinerary" className="hidden text-[13px] tracking-wide opacity-70 transition-opacity hover:opacity-100 md:block">My Trips</Link>
           <button onClick={onOpenAgent} className={`flex items-center gap-2 px-4 py-2 text-[13px] tracking-wide transition-colors ${isHome ? "border border-white/35 hover:bg-white/10" : "bg-charcoal text-ivory hover:bg-gold"}`}>
             <MicIcon className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">Talk to Voyage</span>
@@ -53,11 +58,10 @@ function SiteHeader({ onOpenAgent }: { onOpenAgent: () => void }) {
       </nav>
 
       {menuOpen && (
-        <div className={`border-t px-6 py-4 md:hidden ${isHome ? "border-white/15 bg-charcoal/95" : "border-sand bg-ivory"}`}>
+          <div className={`border-t px-6 py-4 md:hidden ${isHome ? "border-white/15 bg-charcoal/95" : "border-sand bg-ivory"}`}>
           <div className="mx-auto flex max-w-7xl flex-col gap-4 text-sm">
-            <Link href="/" onClick={() => setMenuOpen(false)}>Explore</Link>
-            <Link href="/stays" onClick={() => setMenuOpen(false)}>Stays</Link>
-            <Link href="/itinerary" onClick={() => setMenuOpen(false)}>Itinerary</Link>
+            <Link href="/explore" onClick={() => setMenuOpen(false)}>Explore</Link>
+            <Link href="/trips" onClick={() => setMenuOpen(false)}>My Trips</Link>
           </div>
         </div>
       )}

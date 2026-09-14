@@ -5,15 +5,21 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon } from "@/components/icons";
 import { useVoyage } from "@/components/voyage-provider";
-import { formatPrice, type Hotel } from "@/lib/voyage-data";
+import { formatDateRange, formatPrice, getDestination, type Hotel } from "@/lib/voyage-data";
 
 export function HotelDetails({ hotel }: { hotel: Hotel }) {
   const router = useRouter();
-  const { nights, state, selectHotel } = useVoyage();
+  const { nights, state, setDestination, selectHotel } = useVoyage();
+  const hotelDestination = getDestination(hotel.destinationId);
   const [activeImage, setActiveImage] = useState(0);
   const total = hotel.pricePerNight * nights;
 
   function addToItinerary() {
+    if (state.bookedItinerary) {
+      router.push("/trips");
+      return;
+    }
+    setDestination(hotel.destinationId);
     selectHotel(hotel.id);
     router.push("/itinerary");
   }
@@ -55,7 +61,7 @@ export function HotelDetails({ hotel }: { hotel: Hotel }) {
               </h1>
               <div className="flex items-center gap-4">
                 <span className="text-gold">{"★".repeat(hotel.stars)}</span>
-                <span className="text-taupe">Paris · {hotel.location}</span>
+                <span className="text-taupe">{hotelDestination?.name} · {hotel.location}</span>
               </div>
             </div>
             <blockquote className="mb-10 border-l-2 border-gold pl-6">
@@ -84,7 +90,7 @@ export function HotelDetails({ hotel }: { hotel: Hotel }) {
                 ["Cancellation", "Free until 48h before arrival"],
                 ["Check-in / out", "15:00 — 11:00"],
                 ["Breakfast", "Continental, served 7–10am"],
-                ["Location", `Paris · ${hotel.location}`],
+                ["Location", `${hotelDestination?.name} · ${hotel.location}`],
               ].map(([label, value]) => (
                 <div key={label}>
                   <div className="mb-1.5 text-[10px] uppercase tracking-[0.2em] text-taupe">
@@ -107,7 +113,7 @@ export function HotelDetails({ hotel }: { hotel: Hotel }) {
                 {formatPrice(total)} total for {nights} nights
               </p>
               <div className="mb-8 space-y-3.5 border border-sand p-5 text-sm">
-                <SummaryRow label="Dates" value="12 Oct — 18 Oct" />
+                <SummaryRow label="Dates" value={formatDateRange(state.startDate, state.endDate)} />
                 <SummaryRow
                   label="Guests"
                   value={`${state.adults} adults${state.children ? `, ${state.children} children` : ""}`}
