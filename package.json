@@ -9,6 +9,9 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "start:e2e": "VOYAGE_DB_PATH=.data/voyage.playwright.sqlite next start -p 3100",
+    "test:e2e": "pnpm build && playwright test",
+    "test:webmcp": "pnpm build && playwright test --config=playwright.webmcp.config.ts tests/e2e/webmcp.spec.ts",
     "format": "oxfmt"
   },
   "pnpm": {
@@ -23,6 +26,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.0.0",

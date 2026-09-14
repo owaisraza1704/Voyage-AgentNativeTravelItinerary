@@ -22,8 +22,9 @@ export class ActiveBookingError extends Error {
   }
 }
 
-const dataDirectory = path.join(process.cwd(), ".data")
-const databasePath = path.join(dataDirectory, "voyage.sqlite")
+const defaultDataDirectory = path.join(process.cwd(), ".data")
+const databasePath = process.env.VOYAGE_DB_PATH ?? path.join(defaultDataDirectory, "voyage.sqlite")
+const dataDirectory = path.dirname(databasePath)
 let database: Database.Database | null = null
 
 function getDatabase() {
