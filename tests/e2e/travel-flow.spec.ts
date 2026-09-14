@@ -25,6 +25,44 @@ test("allows a traveler to choose a destination and dates", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Check-out 26 September" })).toBeVisible()
 })
 
+test("transcribes microphone input into the agent message field", async ({ page }) => {
+  await page.addInitScript(() => {
+    const tracks = [{ stop() {} }]
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia: async () => ({ getTracks: () => tracks }) },
+    })
+
+    class MockMediaRecorder {
+      static isTypeSupported() { return true }
+      mimeType = "audio/webm;codecs=opus"
+      ondataavailable: ((event: { data: Blob }) => void) | null = null
+      onstop: (() => void) | null = null
+      onerror: (() => void) | null = null
+      start() {}
+      stop() {
+        this.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) })
+        this.onstop?.()
+      }
+    }
+    Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: MockMediaRecorder })
+  })
+  await page.route("**/api/transcribe", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ text: "Plan a trip to Seoul" }),
+    })
+  })
+
+  await page.goto("/plan")
+  await page.getByRole("button", { name: "Talk to Voyage" }).click()
+  await page.getByRole("button", { name: "Use voice input" }).click()
+  await expect(page.getByRole("button", { name: "Stop voice input" })).toBeVisible()
+  await page.getByRole("button", { name: "Stop voice input" }).click()
+
+  await expect(page.getByPlaceholder("Ask Voyage anything...")).toHaveValue("Plan a trip to Seoul")
+})
+
 test("filters stays and adds one to the itinerary", async ({ page }) => {
   await page.goto("/stays")
 

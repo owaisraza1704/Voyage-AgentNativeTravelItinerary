@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { CloseIcon, MicIcon } from "@/components/icons"
 import { useVoyage } from "@/components/voyage-provider"
 import type { AgentMessage, AgentTool, AgentResponse } from "@/lib/agent-types"
@@ -90,6 +90,12 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null)
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [cancellationSummary, setCancellationSummary] = useState<BookingRecord | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const { state } = useVoyage()
   const router = useRouter()
 
@@ -132,7 +138,7 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
 
   async function submitMessage(value: string) {
     const trimmed = value.trim()
-    if (!trimmed || isThinking) return
+    if (!trimmed || isThinking || isRecording || isTranscribing) return
 
     setMessage("")
     setConversation((current) => [...current, { role: "user", content: trimmed }])
@@ -220,6 +226,74 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
       ])
     } finally {
       setIsThinking(false)
+    }
+  }
+
+  async function transcribeAudio(audio: Blob) {
+    setIsTranscribing(true)
+    setVoiceError(null)
+
+    try {
+      const formData = new FormData()
+      const extension = audio.type.includes("mp4") ? "mp4" : "webm"
+      formData.append("audio", audio, `voyage-recording.${extension}`)
+      const response = await fetch("/api/transcribe", { method: "POST", body: formData })
+      const payload = await response.json() as { text?: string; error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Voice transcription failed.")
+      if (!payload.text?.trim()) throw new Error("No speech was detected.")
+
+      setMessage((current) => current.trim() ? `${current.trim()} ${payload.text?.trim()}` : payload.text?.trim() ?? "")
+    } catch (error: unknown) {
+      setVoiceError(error instanceof Error ? error.message : "Voice transcription failed.")
+    } finally {
+      setIsTranscribing(false)
+    }
+  }
+
+  async function toggleVoiceInput() {
+    if (isTranscribing) return
+    if (isRecording) {
+      recorderRef.current?.stop()
+      return
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceError("Voice input is not supported in this browser.")
+      return
+    }
+
+    setVoiceError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const supportedType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) => MediaRecorder.isTypeSupported(type))
+      const recorder = supportedType ? new MediaRecorder(stream, { mimeType: supportedType }) : new MediaRecorder(stream)
+
+      audioChunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const audio = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" })
+        stream.getTracks().forEach((track) => track.stop())
+        recorderRef.current = null
+        mediaStreamRef.current = null
+        setIsRecording(false)
+        void transcribeAudio(audio)
+      }
+      recorder.onerror = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        recorderRef.current = null
+        mediaStreamRef.current = null
+        setIsRecording(false)
+        setVoiceError("Voice recording failed.")
+      }
+
+      recorderRef.current = recorder
+      mediaStreamRef.current = stream
+      recorder.start()
+      setIsRecording(true)
+    } catch (error: unknown) {
+      setVoiceError(error instanceof Error ? error.message : "Microphone access was denied.")
     }
   }
 
@@ -348,9 +422,12 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         <form onSubmit={(event) => { event.preventDefault(); void submitMessage(message) }} className="border-t border-sand p-5">
           <div className="flex items-center gap-3 border border-sand bg-white px-4 py-2 focus-within:border-charcoal">
             <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask Voyage anything..." className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-taupe" />
-            <button type="button" className="text-taupe transition-colors hover:text-charcoal" aria-label="Use voice input"><MicIcon className="h-4 w-4" /></button>
-            <button type="submit" disabled={isThinking || toolStatus !== "connected"} className="text-sm text-charcoal transition-colors hover:text-gold disabled:cursor-not-allowed disabled:opacity-50">Send</button>
+            <button type="button" onClick={() => void toggleVoiceInput()} disabled={isThinking || isTranscribing} className={`transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${isRecording ? "text-red-900" : "text-taupe hover:text-charcoal"}`} aria-label={isRecording ? "Stop voice input" : "Use voice input"} aria-pressed={isRecording}><MicIcon className="h-4 w-4" /></button>
+            <button type="submit" disabled={isThinking || isRecording || isTranscribing || toolStatus !== "connected"} className="text-sm text-charcoal transition-colors hover:text-gold disabled:cursor-not-allowed disabled:opacity-50">Send</button>
           </div>
+          {isRecording && <p role="status" className="mt-2 text-center text-xs text-red-900">Listening… click the microphone to stop.</p>}
+          {isTranscribing && <p role="status" className="mt-2 text-center text-xs text-taupe">Transcribing…</p>}
+          {voiceError && <p role="alert" className="mt-2 text-center text-xs text-red-900">{voiceError}</p>}
           <p className="mt-3 text-center text-[10px] uppercase tracking-[0.16em] text-taupe">Azure OpenAI · WebMCP tools · local travel data</p>
         </form>
       </aside>
