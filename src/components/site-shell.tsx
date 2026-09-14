@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CloseIcon, MicIcon } from "@/components/icons"
 import { useVoyage } from "@/components/voyage-provider"
+import type { AgentMessage, AgentTool, AgentResponse } from "@/lib/agent-types"
 import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
 
 export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -76,17 +77,19 @@ function NavLink({ href, active, children }: { href: string; active: boolean; ch
 
 function AgentPanel({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState("")
-  const [conversation, setConversation] = useState<string[]>([])
+  const [conversation, setConversation] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([])
+  const [availableTools, setAvailableTools] = useState<AgentTool[]>([])
   const [toolStatus, setToolStatus] = useState<"checking" | "connected" | "unavailable">("checking")
-  const [toolCount, setToolCount] = useState(0)
   const [toolError, setToolError] = useState<string | null>(null)
+  const [isThinking, setIsThinking] = useState(false)
 
   useEffect(() => {
     let disposed = false
     getWebMcpTools()
       .then((tools) => {
         if (disposed) return
-        setToolCount(tools.length)
+        setAvailableTools(tools)
         setToolStatus("connected")
       })
       .catch((error: unknown) => {
@@ -100,36 +103,105 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
     }
   }, [])
 
-  async function runExample() {
-    const userMessage = "Set my destination to Seoul."
-    setConversation((current) => [...current, userMessage])
+  async function requestAgent(messages: AgentMessage[], tools: AgentTool[]) {
+    const toolDefinitions = tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }))
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, tools: toolDefinitions }),
+    })
+    const payload = await response.json() as AgentResponse & { error?: string }
+    if (!response.ok) throw new Error(payload.error ?? "The agent request failed.")
+    return payload.message
+  }
+
+  async function submitMessage(value: string) {
+    const trimmed = value.trim()
+    if (!trimmed || isThinking) return
+
+    setMessage("")
+    setConversation((current) => [...current, { role: "user", content: trimmed }])
+    setIsThinking(true)
 
     try {
-      const tools = await getWebMcpTools()
-      const tool = tools.find((item) => item.name === "set_destination")
-      if (!tool) throw new Error("The set_destination tool is not available.")
+      const tools = availableTools.length > 0 ? availableTools : await getWebMcpTools()
+      if (availableTools.length === 0) {
+        setAvailableTools(tools)
+        setToolStatus("connected")
+      }
 
-      const result = await executeWebMcpTool(tool, { destinationId: "seoul" })
-      setConversation((current) => [
-        ...current,
-        `WebMCP result: ${JSON.stringify(result)}`,
-      ])
+      let messages: AgentMessage[] = [
+        ...agentMessages,
+        { role: "user", content: trimmed },
+      ]
+
+      for (let turn = 0; turn < 5; turn += 1) {
+        const assistantMessage = await requestAgent(messages, tools)
+        messages = [...messages, assistantMessage]
+        setAgentMessages(messages)
+
+        if (!assistantMessage.tool_calls?.length) {
+          setConversation((current) => [
+            ...current,
+            { role: "assistant", content: assistantMessage.content ?? "I could not produce a response." },
+          ])
+          return
+        }
+
+        for (const toolCall of assistantMessage.tool_calls) {
+          let toolResult: unknown
+          const toolName = toolCall.function.name
+
+          if (toolName === "book_itinerary" || toolName === "cancel_booking") {
+            toolResult = {
+              ok: false,
+              code: "USER_CONFIRMATION_REQUIRED",
+              message: "Show the user the relevant summary and wait for an explicit confirmation in the UI before executing this action.",
+            }
+          } else {
+            const tool = tools.find((item) => item.name === toolName)
+            if (!tool) {
+              toolResult = { ok: false, code: "TOOL_NOT_FOUND", message: `The ${toolName} tool is unavailable.` }
+            } else {
+              try {
+                const parsedArguments = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>
+                toolResult = await executeWebMcpTool(tool, parsedArguments)
+              } catch (error: unknown) {
+                toolResult = { ok: false, code: "TOOL_EXECUTION_FAILED", message: error instanceof Error ? error.message : "The WebMCP tool failed." }
+              }
+            }
+          }
+
+          messages = [
+            ...messages,
+            {
+              role: "tool",
+              content: JSON.stringify(toolResult),
+              tool_call_id: toolCall.id,
+              name: toolName,
+            },
+          ]
+        }
+
+        setAgentMessages(messages)
+      }
+
+      throw new Error("The agent reached its tool-call limit.")
     } catch (error: unknown) {
       setConversation((current) => [
         ...current,
-        error instanceof Error ? error.message : "The WebMCP tool failed.",
+        { role: "assistant", content: error instanceof Error ? error.message : "The agent request failed." },
       ])
+    } finally {
+      setIsThinking(false)
     }
   }
 
-  function submitMessage(value: string) {
-    const trimmed = value.trim()
-    if (!trimmed) return
-    setConversation((current) => [...current, trimmed, "The text agent connection will be added next. Use the WebMCP example below to test the live tool bridge."])
-    setMessage("")
-  }
-
-  const toolStatusLabel = toolStatus === "checking" ? "Connecting…" : toolStatus === "connected" ? `${toolCount} tools connected` : "Unavailable"
+  const toolStatusLabel = toolStatus === "checking" ? "Connecting…" : toolStatus === "connected" ? `${availableTools.length} tools connected` : "Unavailable"
 
   return (
     <div className="fixed inset-0 z-50 bg-charcoal/55 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -157,21 +229,22 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
 
           <div className="mt-8 space-y-4">
             {conversation.length === 0 ? (
-              <button onClick={runExample} disabled={toolStatus !== "connected"} className="w-full border border-sand p-4 text-left text-sm leading-relaxed transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">
-                <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-taupe">Run a WebMCP example</span>
+              <button onClick={() => void submitMessage("Set my destination to Seoul.")} disabled={toolStatus !== "connected" || isThinking} className="w-full border border-sand p-4 text-left text-sm leading-relaxed transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-taupe">Ask the Voyage agent</span>
                 Set my destination to Seoul.
               </button>
-            ) : conversation.map((item, index) => <p key={`${item}-${index}`} className={`border-l-2 pl-4 text-sm leading-relaxed ${index % 2 === 0 ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{item}</p>)}
+            ) : conversation.map((item, index) => <p key={`${item.role}-${item.content}-${index}`} className={`border-l-2 pl-4 text-sm leading-relaxed ${item.role === "user" ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{item.content}</p>)}
+            {isThinking && <p className="border-l-2 border-gold pl-4 text-sm text-taupe">Voyage is thinking…</p>}
           </div>
         </div>
 
-        <form onSubmit={(event) => { event.preventDefault(); submitMessage(message) }} className="border-t border-sand p-5">
+        <form onSubmit={(event) => { event.preventDefault(); void submitMessage(message) }} className="border-t border-sand p-5">
           <div className="flex items-center gap-3 border border-sand bg-white px-4 py-2 focus-within:border-charcoal">
             <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask Voyage anything..." className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-taupe" />
             <button type="button" className="text-taupe transition-colors hover:text-charcoal" aria-label="Use voice input"><MicIcon className="h-4 w-4" /></button>
-            <button type="submit" className="text-sm text-charcoal transition-colors hover:text-gold">Send</button>
+            <button type="submit" disabled={isThinking || toolStatus !== "connected"} className="text-sm text-charcoal transition-colors hover:text-gold disabled:cursor-not-allowed disabled:opacity-50">Send</button>
           </div>
-          <p className="mt-3 text-center text-[10px] uppercase tracking-[0.16em] text-taupe">WebMCP tools · local travel data</p>
+          <p className="mt-3 text-center text-[10px] uppercase tracking-[0.16em] text-taupe">Azure OpenAI · WebMCP tools · local travel data</p>
         </form>
       </aside>
     </div>

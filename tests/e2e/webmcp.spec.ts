@@ -197,11 +197,35 @@ test("the agent panel executes a WebMCP tool and updates the planner", async ({
     return
   }
 
+  let agentRequestCount = 0
+  await page.route("**/api/agent", async (route) => {
+    agentRequestCount += 1
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        message: agentRequestCount === 1
+          ? {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: "call_set_destination",
+                type: "function",
+                function: {
+                  name: "set_destination",
+                  arguments: JSON.stringify({ destinationId: "seoul" }),
+                },
+              }],
+            }
+          : { role: "assistant", content: "Seoul is ready for your trip." },
+      }),
+    })
+  })
+
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
   await expect(page.getByText("18 tools connected")).toBeVisible()
   await page.getByRole("button", { name: "Set my destination to Seoul." }).click()
 
-  await expect(page.getByText(/WebMCP result:/)).toBeVisible()
+  await expect(page.getByText("Seoul is ready for your trip.")).toBeVisible()
   await expect(page.getByLabel("Destination")).toHaveValue(
     "Seoul, South Korea",
   )
