@@ -183,3 +183,26 @@ test("WebMCP completes a trip setup, booking, and cancellation flow", async ({
 
   await expect(page.getByText("No booked itinerary yet.")).toBeVisible()
 })
+
+test("the agent panel executes a WebMCP tool and updates the planner", async ({
+  page,
+}) => {
+  await page.goto("/plan")
+
+  const webmcpAvailable = await page.evaluate(
+    () => Boolean(document.modelContext?.getTools && document.modelContext.executeTool),
+  )
+  if (!webmcpAvailable) {
+    test.skip(true, "WebMCP is not enabled in this browser")
+    return
+  }
+
+  await page.getByRole("button", { name: "Talk to Voyage" }).click()
+  await expect(page.getByText("18 tools connected")).toBeVisible()
+  await page.getByRole("button", { name: "Set my destination to Seoul." }).click()
+
+  await expect(page.getByText(/WebMCP result:/)).toBeVisible()
+  await expect(page.getByLabel("Destination")).toHaveValue(
+    "Seoul, South Korea",
+  )
+})

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import { CloseIcon, MicIcon } from "@/components/icons"
 import { useVoyage } from "@/components/voyage-provider"
+import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
 
 export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const [agentOpen, setAgentOpen] = useState(false)
@@ -76,13 +77,59 @@ function NavLink({ href, active, children }: { href: string; active: boolean; ch
 function AgentPanel({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState("")
   const [conversation, setConversation] = useState<string[]>([])
+  const [toolStatus, setToolStatus] = useState<"checking" | "connected" | "unavailable">("checking")
+  const [toolCount, setToolCount] = useState(0)
+  const [toolError, setToolError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let disposed = false
+    getWebMcpTools()
+      .then((tools) => {
+        if (disposed) return
+        setToolCount(tools.length)
+        setToolStatus("connected")
+      })
+      .catch((error: unknown) => {
+        if (disposed) return
+        setToolStatus("unavailable")
+        setToolError(error instanceof Error ? error.message : "WebMCP is unavailable.")
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  async function runExample() {
+    const userMessage = "Set my destination to Seoul."
+    setConversation((current) => [...current, userMessage])
+
+    try {
+      const tools = await getWebMcpTools()
+      const tool = tools.find((item) => item.name === "set_destination")
+      if (!tool) throw new Error("The set_destination tool is not available.")
+
+      const result = await executeWebMcpTool(tool, { destinationId: "seoul" })
+      setConversation((current) => [
+        ...current,
+        `WebMCP result: ${JSON.stringify(result)}`,
+      ])
+    } catch (error: unknown) {
+      setConversation((current) => [
+        ...current,
+        error instanceof Error ? error.message : "The WebMCP tool failed.",
+      ])
+    }
+  }
 
   function submitMessage(value: string) {
     const trimmed = value.trim()
     if (!trimmed) return
-    setConversation((current) => [...current, trimmed, "I’ll use the trip tools to turn that into a plan. This demo panel is ready for the WebMCP agent connection."])
+    setConversation((current) => [...current, trimmed, "The text agent connection will be added next. Use the WebMCP example below to test the live tool bridge."])
     setMessage("")
   }
+
+  const toolStatusLabel = toolStatus === "checking" ? "Connecting…" : toolStatus === "connected" ? `${toolCount} tools connected` : "Unavailable"
 
   return (
     <div className="fixed inset-0 z-50 bg-charcoal/55 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -101,13 +148,18 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
               {Array.from({ length: 18 }).map((_, index) => <span key={index} className="voice-bar w-0.5 rounded-full bg-gold" style={{ animationDelay: `${index * 55}ms` }} />)}
             </div>
             <p className="text-center text-sm leading-relaxed text-taupe">Tell me where you want to go, your dates, and what matters to you.</p>
+            <div className="mt-4 flex items-center justify-between border-t border-sand pt-3 text-[10px] uppercase tracking-[0.14em]">
+              <span className="text-taupe">WebMCP</span>
+              <span className={toolStatus === "connected" ? "text-green-800" : "text-taupe"}>{toolStatusLabel}</span>
+            </div>
+            {toolError && <p className="mt-3 text-center text-xs text-red-900">{toolError}</p>}
           </div>
 
           <div className="mt-8 space-y-4">
             {conversation.length === 0 ? (
-              <button onClick={() => submitMessage("Find me a five-star hotel in Paris for six nights with breakfast included.")} className="w-full border border-sand p-4 text-left text-sm leading-relaxed transition-colors hover:border-charcoal">
-                <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-taupe">Try an example</span>
-                Find me a five-star hotel in Paris for six nights with breakfast included.
+              <button onClick={runExample} disabled={toolStatus !== "connected"} className="w-full border border-sand p-4 text-left text-sm leading-relaxed transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">
+                <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-taupe">Run a WebMCP example</span>
+                Set my destination to Seoul.
               </button>
             ) : conversation.map((item, index) => <p key={`${item}-${index}`} className={`border-l-2 pl-4 text-sm leading-relaxed ${index % 2 === 0 ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{item}</p>)}
           </div>
