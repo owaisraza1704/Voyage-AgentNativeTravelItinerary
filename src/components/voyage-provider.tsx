@@ -10,13 +10,16 @@ import {
 } from "react";
 import {
   calculateNights,
+  createDefaultStayFilters,
   getDestination,
   getHotel,
   type Hotel,
+  type StayFilters,
+  type StaySort,
 } from "@/lib/voyage-data";
 import type { BookingRecord } from "@/lib/booking-types";
 
-type TripState = {
+export type TripState = {
   destinationId: string;
   startDate: string;
   endDate: string;
@@ -27,6 +30,8 @@ type TripState = {
   bookingReference: string | null;
   bookedItinerary: BookingRecord | null;
   bookingHistory: BookingRecord[];
+  filters: StayFilters;
+  sortOption: StaySort;
 };
 
 type TripAction =
@@ -35,6 +40,9 @@ type TripAction =
   | { type: "travelers/set"; adults: number; children: number }
   | { type: "hotel/select"; hotelId: string }
   | { type: "hotel/remove" }
+  | { type: "filters/update"; filters: Partial<StayFilters> }
+  | { type: "filters/reset" }
+  | { type: "sort/set"; sort: StaySort }
   | {
       type: "bookings/load";
       activeBooking: BookingRecord | null;
@@ -54,6 +62,8 @@ const initialState: TripState = {
   bookingReference: null,
   bookedItinerary: null,
   bookingHistory: [],
+  filters: createDefaultStayFilters(),
+  sortOption: "recommended",
 };
 
 function tripReducer(state: TripState, action: TripAction): TripState {
@@ -65,6 +75,8 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         selectedHotelId: null,
         bookingStatus: "draft",
         bookingReference: null,
+        filters: createDefaultStayFilters(),
+        sortOption: "recommended",
       };
     case "dates/set":
       return {
@@ -96,6 +108,19 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         bookingStatus: "draft",
         bookingReference: null,
       };
+    case "filters/update":
+      return {
+        ...state,
+        filters: { ...state.filters, ...action.filters },
+      };
+    case "filters/reset":
+      return {
+        ...state,
+        filters: createDefaultStayFilters(),
+        sortOption: "recommended",
+      };
+    case "sort/set":
+      return { ...state, sortOption: action.sort };
     case "bookings/load":
       return {
         ...state,
@@ -147,7 +172,7 @@ function tripReducer(state: TripState, action: TripAction): TripState {
   }
 }
 
-type VoyageContextValue = {
+export type VoyageContextValue = {
   state: TripState;
   destination: ReturnType<typeof getDestination>;
   selectedHotel: Hotel | undefined;
@@ -161,8 +186,11 @@ type VoyageContextValue = {
   setTravelers: (adults: number, children: number) => void;
   selectHotel: (hotelId: string) => void;
   removeHotel: () => void;
-  confirmBooking: () => Promise<boolean>;
-  cancelBooking: () => Promise<boolean>;
+  confirmBooking: () => Promise<BookingRecord | null>;
+  cancelBooking: () => Promise<BookingRecord | null>;
+  setFilters: (filters: Partial<StayFilters>) => void;
+  setSort: (sort: StaySort) => void;
+  resetFilters: () => void;
 };
 
 const VoyageContext = createContext<VoyageContextValue | null>(null);
@@ -233,6 +261,9 @@ export function VoyageProvider({
         dispatch({ type: "travelers/set", adults, children }),
       selectHotel: (hotelId) => dispatch({ type: "hotel/select", hotelId }),
       removeHotel: () => dispatch({ type: "hotel/remove" }),
+      setFilters: (filters) => dispatch({ type: "filters/update", filters }),
+      setSort: (sort) => dispatch({ type: "sort/set", sort }),
+      resetFilters: () => dispatch({ type: "filters/reset" }),
       confirmBooking: async () => {
         setBookingError(null);
         const response = await fetch("/api/bookings", {
@@ -250,16 +281,16 @@ export function VoyageProvider({
         const payload = await response.json();
         if (!response.ok) {
           setBookingError(payload.message ?? "Unable to create booking.");
-          return false;
+          return null;
         }
         dispatch({
           type: "booking/confirmed",
           booking: payload as BookingRecord,
         });
-        return true;
+        return payload as BookingRecord;
       },
       cancelBooking: async () => {
-        if (!state.bookedItinerary) return false;
+        if (!state.bookedItinerary) return null;
         setBookingError(null);
         const response = await fetch(
           `/api/bookings/${state.bookedItinerary.reference}/cancel`,
@@ -268,13 +299,13 @@ export function VoyageProvider({
         const payload = await response.json();
         if (!response.ok) {
           setBookingError(payload.message ?? "Unable to cancel booking.");
-          return false;
+          return null;
         }
         dispatch({
           type: "booking/cancelled",
           booking: payload as BookingRecord,
         });
-        return true;
+        return payload as BookingRecord;
       },
     }),
     [

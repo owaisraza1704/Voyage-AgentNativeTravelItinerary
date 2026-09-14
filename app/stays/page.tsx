@@ -5,43 +5,23 @@ import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeftIcon } from "@/components/icons"
 import { useVoyage } from "@/components/voyage-provider"
-import { formatDateRange, formatPrice, hotels } from "@/lib/voyage-data"
+import { filterAndSortHotels, formatDateRange, formatPrice, hotels, type StaySort } from "@/lib/voyage-data"
 
 const MIN_PRICE = 0
 const MAX_PRICE = 300
 type OpenFilter = "price" | "rating" | "location" | "amenities" | "sort" | null
-type SortOption = "recommended" | "price-asc" | "price-desc" | "rating-desc"
 
 export default function StaysPage() {
   const router = useRouter()
-  const { state, destination, nights, selectHotel } = useVoyage()
+  const { state, destination, nights, selectHotel, setFilters, setSort, resetFilters } = useVoyage()
   const [openFilter, setOpenFilter] = useState<OpenFilter>(null)
-  const [minRating, setMinRating] = useState(3)
-  const [maxRating, setMaxRating] = useState(5)
-  const [minPrice, setMinPrice] = useState(MIN_PRICE)
-  const [maxPrice, setMaxPrice] = useState(MAX_PRICE)
-  const [breakfastOnly, setBreakfastOnly] = useState(false)
-  const [locationFilter, setLocationFilter] = useState("all")
-  const [amenityFilters, setAmenityFilters] = useState<string[]>([])
-  const [sortOption, setSortOption] = useState<SortOption>("recommended")
+  const { minRating, maxRating, minPrice, maxPrice, breakfastOnly, location: locationFilter, amenities: amenityFilters } = state.filters
+  const sortOption = state.sortOption
 
   const locationOptions = useMemo(() => Array.from(new Set(hotels.filter((hotel) => hotel.destinationId === state.destinationId).map((hotel) => hotel.location))), [state.destinationId])
   const amenityOptions = useMemo(() => Array.from(new Set(hotels.filter((hotel) => hotel.destinationId === state.destinationId).flatMap((hotel) => hotel.amenities))).sort(), [state.destinationId])
 
-  const results = useMemo(() => hotels.filter((hotel) => {
-    if (hotel.destinationId !== state.destinationId) return false
-    if (hotel.stars < minRating || hotel.stars > maxRating) return false
-    if (hotel.pricePerNight < minPrice || hotel.pricePerNight > maxPrice) return false
-    if (locationFilter !== "all" && hotel.location !== locationFilter) return false
-    if (amenityFilters.some((amenity) => !hotel.amenities.includes(amenity))) return false
-    if (breakfastOnly && !hotel.amenities.some((amenity) => amenity.toLowerCase().includes("breakfast"))) return false
-    return true
-  }).sort((first, second) => {
-    if (sortOption === "price-asc") return first.pricePerNight - second.pricePerNight
-    if (sortOption === "price-desc") return second.pricePerNight - first.pricePerNight
-    if (sortOption === "rating-desc") return second.stars - first.stars || first.pricePerNight - second.pricePerNight
-    return 0
-  }), [amenityFilters, breakfastOnly, locationFilter, maxPrice, maxRating, minPrice, minRating, sortOption, state.destinationId])
+  const results = useMemo(() => filterAndSortHotels(state.destinationId, state.filters, sortOption), [sortOption, state.destinationId, state.filters])
 
   const ratingLabel = minRating === maxRating ? `${minRating} star${minRating === 1 ? "" : "s"}` : `${minRating}–${maxRating} stars`
   const priceLabel = minPrice === MIN_PRICE ? `Under ${formatPrice(maxPrice)}/night` : `${formatPrice(minPrice)}–${formatPrice(maxPrice)}/night`
@@ -62,14 +42,7 @@ export default function StaysPage() {
   }
 
   function clearFilters() {
-    setMinRating(3)
-    setMaxRating(5)
-    setMinPrice(MIN_PRICE)
-    setMaxPrice(MAX_PRICE)
-    setBreakfastOnly(false)
-    setLocationFilter("all")
-    setAmenityFilters([])
-    setSortOption("recommended")
+    resetFilters()
     setOpenFilter(null)
   }
 
@@ -82,28 +55,28 @@ export default function StaysPage() {
         <div className="mb-4 flex flex-wrap items-start gap-2.5">
           <div className="relative">
             <FilterButton label="Price" active={hasPriceFilter} onClick={() => setOpenFilter(openFilter === "price" ? null : "price")} />
-            {openFilter === "price" && <PriceFilter minPrice={minPrice} maxPrice={maxPrice} onMinChange={setMinPrice} onMaxChange={setMaxPrice} />}
+            {openFilter === "price" && <PriceFilter minPrice={minPrice} maxPrice={maxPrice} onMinChange={(value) => setFilters({ minPrice: value })} onMaxChange={(value) => setFilters({ maxPrice: value })} />}
           </div>
           <div className="relative">
             <FilterButton label="Rating" active={hasRatingFilter} onClick={() => setOpenFilter(openFilter === "rating" ? null : "rating")} />
-            {openFilter === "rating" && <RatingFilter minRating={minRating} maxRating={maxRating} onMinChange={setMinRating} onMaxChange={setMaxRating} />}
+            {openFilter === "rating" && <RatingFilter minRating={minRating} maxRating={maxRating} onMinChange={(value) => setFilters({ minRating: value })} onMaxChange={(value) => setFilters({ maxRating: value })} />}
           </div>
           <div className="relative">
             <FilterButton label="Location" active={hasLocationFilter} onClick={() => setOpenFilter(openFilter === "location" ? null : "location")} />
-            {openFilter === "location" && <LocationFilter value={locationFilter} options={locationOptions} onChange={(value) => { setLocationFilter(value); setOpenFilter(null) }} />}
+            {openFilter === "location" && <LocationFilter value={locationFilter} options={locationOptions} onChange={(value) => { setFilters({ location: value }); setOpenFilter(null) }} />}
           </div>
           <div className="relative">
             <FilterButton label="Amenities" active={hasAmenityFilter} onClick={() => setOpenFilter(openFilter === "amenities" ? null : "amenities")} />
-            {openFilter === "amenities" && <AmenitiesFilter options={amenityOptions} selected={amenityFilters} onChange={setAmenityFilters} />}
+            {openFilter === "amenities" && <AmenitiesFilter options={amenityOptions} selected={amenityFilters} onChange={(amenities) => setFilters({ amenities })} />}
           </div>
-          <FilterButton label="Breakfast" active={breakfastOnly} onClick={() => setBreakfastOnly((active) => !active)} />
+          <FilterButton label="Breakfast" active={breakfastOnly} onClick={() => setFilters({ breakfastOnly: !breakfastOnly })} />
           <div className="relative">
             <FilterButton label={sortOption === "recommended" ? "Sort: Recommended" : `Sort: ${sortLabel(sortOption)}`} active={hasSortFilter} onClick={() => setOpenFilter(openFilter === "sort" ? null : "sort")} />
-            {openFilter === "sort" && <SortFilter value={sortOption} onChange={(value) => { setSortOption(value); setOpenFilter(null) }} />}
+            {openFilter === "sort" && <SortFilter value={sortOption} onChange={(value) => { setSort(value); setOpenFilter(null) }} />}
           </div>
         </div>
 
-        {hasActiveFilters && <div className="mb-9 flex flex-wrap items-center gap-2"><span className="text-[11px] tracking-wide text-taupe">Active:</span>{hasPriceFilter && <button onClick={() => { setMinPrice(MIN_PRICE); setMaxPrice(MAX_PRICE) }} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{priceLabel} <span className="ml-1.5 opacity-50">×</span></button>}{hasRatingFilter && <button onClick={() => { setMinRating(3); setMaxRating(5) }} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{ratingLabel} <span className="ml-1.5 opacity-50">×</span></button>}{hasLocationFilter && <button onClick={() => setLocationFilter("all")} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{locationFilter} <span className="ml-1.5 opacity-50">×</span></button>}{hasAmenityFilter && <button onClick={() => setAmenityFilters([])} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{amenityFilters.length} amenities <span className="ml-1.5 opacity-50">×</span></button>}{hasSortFilter && <button onClick={() => setSortOption("recommended")} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{sortLabel(sortOption)} <span className="ml-1.5 opacity-50">×</span></button>}{breakfastOnly && <button onClick={() => setBreakfastOnly(false)} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">Breakfast <span className="ml-1.5 opacity-50">×</span></button>}<button onClick={clearFilters} className="ml-1 border border-sand px-3 py-1 text-xs tracking-wide text-taupe transition-colors hover:border-charcoal hover:text-charcoal">Reset filters</button></div>}
+        {hasActiveFilters && <div className="mb-9 flex flex-wrap items-center gap-2"><span className="text-[11px] tracking-wide text-taupe">Active:</span>{hasPriceFilter && <button onClick={() => setFilters({ minPrice: MIN_PRICE, maxPrice: MAX_PRICE })} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{priceLabel} <span className="ml-1.5 opacity-50">×</span></button>}{hasRatingFilter && <button onClick={() => setFilters({ minRating: 3, maxRating: 5 })} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{ratingLabel} <span className="ml-1.5 opacity-50">×</span></button>}{hasLocationFilter && <button onClick={() => setFilters({ location: "all" })} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{locationFilter} <span className="ml-1.5 opacity-50">×</span></button>}{hasAmenityFilter && <button onClick={() => setFilters({ amenities: [] })} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{amenityFilters.length} amenities <span className="ml-1.5 opacity-50">×</span></button>}{hasSortFilter && <button onClick={() => setSort("recommended")} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">{sortLabel(sortOption)} <span className="ml-1.5 opacity-50">×</span></button>}{breakfastOnly && <button onClick={() => setFilters({ breakfastOnly: false })} className="bg-charcoal px-3 py-1 text-xs tracking-wide text-ivory transition-colors hover:bg-gold">Breakfast <span className="ml-1.5 opacity-50">×</span></button>}<button onClick={clearFilters} className="ml-1 border border-sand px-3 py-1 text-xs tracking-wide text-taupe transition-colors hover:border-charcoal hover:text-charcoal">Reset filters</button></div>}
 
         <p className="mb-8 text-sm text-taupe">{results.length} properties found</p>
         {results.length > 0 ? <div className="space-y-5">{results.map((hotel, index) => <HotelCard key={hotel.id} hotel={hotel} nights={nights} index={index} onAdd={() => addToItinerary(hotel.id)} />)}</div> : <div className="border border-sand p-12 text-center"><h2 className="font-serif text-3xl">Nothing quite matched.</h2><p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-taupe">Try widening the rating or price range and we’ll bring back more options.</p><button onClick={clearFilters} className="mt-7 border border-charcoal px-5 py-2.5 text-sm transition-colors hover:bg-charcoal hover:text-ivory">Clear filters</button></div>}
@@ -116,7 +89,7 @@ function FilterButton({ label, active, onClick }: { label: string; active: boole
   return <button onClick={onClick} className={`border px-4 py-2 text-[13px] transition-colors ${active ? "border-charcoal bg-charcoal text-ivory" : "border-sand text-charcoal hover:border-charcoal"}`}>{label}</button>
 }
 
-function sortLabel(value: SortOption) {
+function sortLabel(value: StaySort) {
   if (value === "price-asc") return "Price: Low to High"
   if (value === "price-desc") return "Price: High to Low"
   if (value === "rating-desc") return "Rating"
@@ -135,8 +108,8 @@ function AmenitiesFilter({ options, selected, onChange }: { options: string[]; s
   return <div className="absolute left-0 top-11 z-20 w-72 border border-sand bg-ivory p-4 shadow-xl"><p className="mb-3 text-[10px] uppercase tracking-[0.18em] text-taupe">Amenities</p><div className="max-h-64 space-y-1 overflow-y-auto">{options.map((amenity) => <button key={amenity} onClick={() => toggle(amenity)} className={`block w-full px-3 py-2 text-left text-sm transition-colors ${selected.includes(amenity) ? "bg-charcoal text-ivory" : "text-charcoal hover:bg-stone"}`}>{amenity}</button>)}</div><button onClick={() => onChange([])} className="mt-3 border-t border-sand pt-3 text-xs text-taupe underline-offset-4 hover:text-charcoal hover:underline">Clear amenities</button></div>
 }
 
-function SortFilter({ value, onChange }: { value: SortOption; onChange: (value: SortOption) => void }) {
-  return <div className="absolute right-0 top-11 z-20 w-64 border border-sand bg-ivory p-4 shadow-xl"><p className="mb-3 text-[10px] uppercase tracking-[0.18em] text-taupe">Sort stays by</p><div className="space-y-1">{(["recommended", "price-asc", "price-desc", "rating-desc"] as SortOption[]).map((option) => <button key={option} onClick={() => onChange(option)} className={`block w-full px-3 py-2 text-left text-sm transition-colors ${value === option ? "bg-charcoal text-ivory" : "text-charcoal hover:bg-stone"}`}>{sortLabel(option)}</button>)}</div></div>
+function SortFilter({ value, onChange }: { value: StaySort; onChange: (value: StaySort) => void }) {
+  return <div className="absolute right-0 top-11 z-20 w-64 border border-sand bg-ivory p-4 shadow-xl"><p className="mb-3 text-[10px] uppercase tracking-[0.18em] text-taupe">Sort stays by</p><div className="space-y-1">{(["recommended", "price-asc", "price-desc", "rating-desc"] as StaySort[]).map((option) => <button key={option} onClick={() => onChange(option)} className={`block w-full px-3 py-2 text-left text-sm transition-colors ${value === option ? "bg-charcoal text-ivory" : "text-charcoal hover:bg-stone"}`}>{sortLabel(option)}</button>)}</div></div>
 }
 
 function PriceFilter({ minPrice, maxPrice, onMinChange, onMaxChange }: { minPrice: number; maxPrice: number; onMinChange: (value: number) => void; onMaxChange: (value: number) => void }) {
