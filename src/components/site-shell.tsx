@@ -6,6 +6,8 @@ import { useEffect, useState } from "react"
 import { CloseIcon, MicIcon } from "@/components/icons"
 import { useVoyage } from "@/components/voyage-provider"
 import type { AgentMessage, AgentTool, AgentResponse } from "@/lib/agent-types"
+import type { BookingRecord } from "@/lib/booking-types"
+import { formatDateRange, formatPrice } from "@/lib/voyage-data"
 import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
 
 export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -23,7 +25,7 @@ export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>)
       <SiteHeader onOpenAgent={() => setAgentOpen(true)} />
       {state.bookedItinerary && <ActiveBookingBanner />}
       <main>{children}</main>
-      {agentOpen && <AgentPanel onClose={() => setAgentOpen(false)} />}
+      <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
     </div>
   )
 }
@@ -75,7 +77,7 @@ function NavLink({ href, active, children }: { href: string; active: boolean; ch
   return <Link href={href} className={`transition-opacity hover:opacity-100 ${active ? "opacity-100" : "opacity-65"}`}>{children}</Link>
 }
 
-function AgentPanel({ onClose }: { onClose: () => void }) {
+function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [message, setMessage] = useState("")
   const [conversation, setConversation] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([])
@@ -83,8 +85,14 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
   const [toolStatus, setToolStatus] = useState<"checking" | "connected" | "unavailable">("checking")
   const [toolError, setToolError] = useState<string | null>(null)
   const [isThinking, setIsThinking] = useState(false)
+  const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null)
+  const [bookingError, setBookingError] = useState<string | null>(null)
+  const [cancellationSummary, setCancellationSummary] = useState<BookingRecord | null>(null)
+  const { state } = useVoyage()
 
   useEffect(() => {
+    if (!open) return
+
     let disposed = false
     getWebMcpTools()
       .then((tools) => {
@@ -101,7 +109,7 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
     return () => {
       disposed = true
     }
-  }, [])
+  }, [open])
 
   async function requestAgent(messages: AgentMessage[], tools: AgentTool[]) {
     const toolDefinitions = tools.map((tool) => ({
@@ -157,6 +165,10 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
           const toolName = toolCall.function.name
 
           if (toolName === "book_itinerary" || toolName === "cancel_booking") {
+            if (toolName === "cancel_booking" && state.bookedItinerary) {
+              setCancellationSummary(state.bookedItinerary)
+              setBookingError(null)
+            }
             toolResult = {
               ok: false,
               code: "USER_CONFIRMATION_REQUIRED",
@@ -170,6 +182,13 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
               try {
                 const parsedArguments = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>
                 toolResult = await executeWebMcpTool(tool, parsedArguments)
+                if (toolName === "get_booking_summary") {
+                  const summaryResult = toolResult as { ok?: boolean; summary?: BookingSummary }
+                  if (summaryResult.ok && summaryResult.summary) {
+                    setBookingSummary(summaryResult.summary)
+                    setBookingError(null)
+                  }
+                }
               } catch (error: unknown) {
                 toolResult = { ok: false, code: "TOOL_EXECUTION_FAILED", message: error instanceof Error ? error.message : "The WebMCP tool failed." }
               }
@@ -201,6 +220,81 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function confirmBooking() {
+    if (isThinking) return
+    const tool = availableTools.find((item) => item.name === "book_itinerary")
+    if (!tool) {
+      setBookingError("The booking tool is unavailable.")
+      return
+    }
+
+    setIsThinking(true)
+    setBookingError(null)
+    try {
+      const result = await executeWebMcpTool(tool, { confirmation: "confirmed" }) as {
+        ok?: boolean
+        booking?: { reference?: string }
+        message?: string
+      }
+      if (!result.ok) throw new Error(result.message ?? "The booking could not be completed.")
+
+      setBookingSummary(null)
+      setConversation((current) => [
+        ...current,
+        { role: "assistant", content: `Your journey is confirmed${result.booking?.reference ? ` · ${result.booking.reference}` : "."}` },
+      ])
+    } catch (error: unknown) {
+      setBookingError(error instanceof Error ? error.message : "The booking could not be completed.")
+    } finally {
+      setIsThinking(false)
+    }
+  }
+
+  async function confirmCancellation() {
+    if (isThinking || !cancellationSummary) return
+    const tool = availableTools.find((item) => item.name === "cancel_booking")
+    if (!tool) {
+      setBookingError("The cancellation tool is unavailable.")
+      return
+    }
+
+    setIsThinking(true)
+    setBookingError(null)
+    try {
+      const result = await executeWebMcpTool(tool, {
+        bookingReference: cancellationSummary.reference,
+        confirmation: "confirmed",
+      }) as {
+        ok?: boolean
+        booking?: { reference?: string }
+        message?: string
+      }
+      if (!result.ok) throw new Error(result.message ?? "The booking could not be cancelled.")
+
+      setCancellationSummary(null)
+      setConversation((current) => [
+        ...current,
+        { role: "assistant", content: `Your booking has been cancelled${result.booking?.reference ? ` · ${result.booking.reference}` : "."}` },
+      ])
+    } catch (error: unknown) {
+      setBookingError(error instanceof Error ? error.message : "The booking could not be cancelled.")
+    } finally {
+      setIsThinking(false)
+    }
+  }
+
+  function clearChat() {
+    if (isThinking) return
+    setMessage("")
+    setConversation([])
+    setAgentMessages([])
+    setBookingSummary(null)
+    setCancellationSummary(null)
+    setBookingError(null)
+  }
+
+  if (!open) return null
+
   const toolStatusLabel = toolStatus === "checking" ? "Connecting…" : toolStatus === "connected" ? `${availableTools.length} tools connected` : "Unavailable"
 
   return (
@@ -211,7 +305,10 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
             <p className="text-[10px] uppercase tracking-[0.22em] text-taupe">Agent workspace</p>
             <h2 className="mt-1 font-serif text-2xl">Plan with Voyage</h2>
           </div>
-          <button onClick={onClose} className="p-2 text-taupe transition-colors hover:text-charcoal" aria-label="Close assistant"><CloseIcon className="h-5 w-5" /></button>
+          <div className="flex items-center gap-3">
+            <button onClick={clearChat} disabled={isThinking} className="text-xs text-taupe transition-colors hover:text-charcoal disabled:cursor-not-allowed disabled:opacity-50">Clear chat</button>
+            <button onClick={onClose} className="p-2 text-taupe transition-colors hover:text-charcoal" aria-label="Close assistant"><CloseIcon className="h-5 w-5" /></button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-7">
@@ -227,13 +324,16 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
             {toolError && <p className="mt-3 text-center text-xs text-red-900">{toolError}</p>}
           </div>
 
+          {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { setBookingSummary(null); setBookingError(null) }} />}
+          {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { setCancellationSummary(null); setBookingError(null) }} />}
+
           <div className="mt-8 space-y-4">
             {conversation.length === 0 ? (
               <button onClick={() => void submitMessage("Set my destination to Seoul.")} disabled={toolStatus !== "connected" || isThinking} className="w-full border border-sand p-4 text-left text-sm leading-relaxed transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">
                 <span className="mb-1 block text-[10px] uppercase tracking-[0.18em] text-taupe">Ask the Voyage agent</span>
                 Set my destination to Seoul.
               </button>
-            ) : conversation.map((item, index) => <p key={`${item.role}-${item.content}-${index}`} className={`border-l-2 pl-4 text-sm leading-relaxed ${item.role === "user" ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{item.content}</p>)}
+            ) : conversation.map((item, index) => <p key={`${item.role}-${item.content}-${index}`} className={`whitespace-pre-line border-l-2 pl-4 text-sm leading-relaxed ${item.role === "user" ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{formatAgentText(item.content)}</p>)}
             {isThinking && <p className="border-l-2 border-gold pl-4 text-sm text-taupe">Voyage is thinking…</p>}
           </div>
         </div>
@@ -249,4 +349,58 @@ function AgentPanel({ onClose }: { onClose: () => void }) {
       </aside>
     </div>
   )
+}
+
+type BookingSummary = {
+  destination: { name: string; country: string }
+  dates: { startDate: string; endDate: string; nights: number }
+  travelers: { adults: number; children: number }
+  selectedStay: { name: string; total: number }
+  total: number
+}
+
+function formatAgentText(content: string) {
+  return content
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "• ")
+}
+
+function BookingConfirmationCard({ summary, bookingError, disabled, onConfirm, onKeepPlanning }: { summary: BookingSummary; bookingError: string | null; disabled: boolean; onConfirm: () => void; onKeepPlanning: () => void }) {
+  return <section className="border border-gold/60 bg-gold/5 p-5" aria-label="Booking confirmation">
+    <p className="text-[10px] uppercase tracking-[0.18em] text-gold">Review before booking</p>
+    <h3 className="mt-2 font-serif text-2xl text-charcoal">{summary.selectedStay.name}</h3>
+    <p className="mt-1 text-sm text-taupe">{summary.destination.name}, {summary.destination.country}</p>
+    <div className="mt-5 space-y-2 border-t border-gold/20 pt-4 text-sm">
+      <div className="flex justify-between gap-4"><span className="text-taupe">Dates</span><span className="text-right text-charcoal">{formatDateRange(summary.dates.startDate, summary.dates.endDate)}</span></div>
+      <div className="flex justify-between gap-4"><span className="text-taupe">Travelers</span><span className="text-right text-charcoal">{summary.travelers.adults} adults{summary.travelers.children ? `, ${summary.travelers.children} children` : ""}</span></div>
+      <div className="flex justify-between gap-4"><span className="text-taupe">Duration</span><span className="text-right text-charcoal">{summary.dates.nights} nights</span></div>
+      <div className="flex justify-between gap-4 border-t border-gold/20 pt-3"><span className="font-medium text-charcoal">Total</span><span className="font-serif text-xl text-charcoal">{formatPrice(summary.total)}</span></div>
+    </div>
+    {bookingError && <p className="mt-4 border border-red-900/20 bg-red-50/50 p-3 text-xs leading-relaxed text-red-900">{bookingError}</p>}
+    <div className="mt-5 flex gap-3">
+      <button onClick={onConfirm} disabled={disabled} className="flex-1 bg-charcoal px-4 py-3 text-xs uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-gold disabled:cursor-not-allowed disabled:opacity-50">{disabled ? "Booking…" : "Confirm booking"}</button>
+      <button onClick={onKeepPlanning} disabled={disabled} className="border border-sand px-4 py-3 text-xs text-charcoal transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">Keep planning</button>
+    </div>
+  </section>
+}
+
+function CancellationConfirmationCard({ booking, bookingError, disabled, onConfirm, onKeepPlanning }: { booking: BookingRecord; bookingError: string | null; disabled: boolean; onConfirm: () => void; onKeepPlanning: () => void }) {
+  return <section className="mt-6 border border-red-900/30 bg-red-50/30 p-5" aria-label="Cancellation confirmation">
+    <p className="text-[10px] uppercase tracking-[0.18em] text-red-900">Review before cancelling</p>
+    <h3 className="mt-2 font-serif text-2xl text-charcoal">{booking.hotelName}</h3>
+    <p className="mt-1 text-sm text-taupe">{booking.destinationName}, {booking.destinationCountry}</p>
+    <div className="mt-5 space-y-2 border-t border-red-900/15 pt-4 text-sm">
+      <div className="flex justify-between gap-4"><span className="text-taupe">Confirmation</span><span className="text-right text-charcoal">{booking.reference}</span></div>
+      <div className="flex justify-between gap-4"><span className="text-taupe">Dates</span><span className="text-right text-charcoal">{formatDateRange(booking.startDate, booking.endDate)}</span></div>
+      <div className="flex justify-between gap-4"><span className="text-taupe">Total paid</span><span className="font-serif text-xl text-charcoal">{formatPrice(booking.total)}</span></div>
+    </div>
+    {bookingError && <p className="mt-4 border border-red-900/20 bg-red-50/50 p-3 text-xs leading-relaxed text-red-900">{bookingError}</p>}
+    <div className="mt-5 flex gap-3">
+      <button onClick={onConfirm} disabled={disabled} className="flex-1 bg-red-900 px-4 py-3 text-xs uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-charcoal disabled:cursor-not-allowed disabled:opacity-50">{disabled ? "Cancelling…" : "Confirm cancellation"}</button>
+      <button onClick={onKeepPlanning} disabled={disabled} className="border border-sand px-4 py-3 text-xs text-charcoal transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">Keep booking</button>
+    </div>
+  </section>
 }

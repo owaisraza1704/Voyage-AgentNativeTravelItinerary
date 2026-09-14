@@ -9,9 +9,11 @@ import {
   type StaySort,
 } from "@/lib/voyage-data"
 import type { ModelContext, WebMcpResult, WebMcpTool } from "@/lib/webmcp/types"
+import { voyagePagePaths, type VoyagePage } from "@/lib/webmcp/navigation"
 
 type VoyageToolApi = Pick<VoyageContextValue, "setDestination" | "setDates" | "setTravelers" | "selectHotel" | "removeHotel" | "setFilters" | "setSort" | "confirmBooking" | "cancelBooking"> & {
   getSnapshot: () => VoyageContextValue
+  navigate: (page: VoyagePage) => void
 }
 
 function result(payload: Record<string, unknown>): WebMcpResult {
@@ -165,6 +167,17 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
         if (adults === undefined || children === undefined || !Number.isInteger(adults) || !Number.isInteger(children) || adults < 1 || children < 0) return result({ ok: false, code: "INVALID_TRAVELERS", message: "Travelers must include at least one adult and use whole numbers." })
         actions.setTravelers(adults, children)
         return result({ ok: true, adults, children })
+      },
+    },
+    {
+      name: "navigate_to",
+      description: "Show the user the relevant Voyage page after changing or reviewing trip state.",
+      inputSchema: { type: "object", properties: { page: { type: "string", enum: Object.keys(voyagePagePaths) } }, required: ["page"], additionalProperties: false },
+      execute: (rawInput) => {
+        const page = inputString(inputObject(rawInput), "page")
+        if (!page || !(page in voyagePagePaths)) return result({ ok: false, code: "INVALID_PAGE", message: "Use planner, stays, itinerary, or trips." })
+        actions.navigate(page as VoyagePage)
+        return result({ ok: true, page, path: voyagePagePaths[page as VoyagePage] })
       },
     },
     {

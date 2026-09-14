@@ -1,11 +1,14 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { useVoyage } from "@/components/voyage-provider"
 import { registerVoyageTools } from "@/lib/webmcp/register-tools"
+import { voyagePagePaths } from "@/lib/webmcp/navigation"
 
 export function WebMcpProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const voyage = useVoyage()
+  const router = useRouter()
   const voyageRef = useRef(voyage)
   voyageRef.current = voyage
 
@@ -25,12 +28,13 @@ export function WebMcpProvider({ children }: Readonly<{ children: React.ReactNod
       setSort: (sort) => voyageRef.current.setSort(sort),
       confirmBooking: () => voyageRef.current.confirmBooking(),
       cancelBooking: () => voyageRef.current.cancelBooking(),
+      navigate: (page) => router.push(voyagePagePaths[page]),
     }, controller.signal).catch(() => {
       // The browser can reject registration when WebMCP is unavailable or disabled.
     })
 
     return () => controller.abort()
-  }, [])
+  }, [router])
 
   return children
 }

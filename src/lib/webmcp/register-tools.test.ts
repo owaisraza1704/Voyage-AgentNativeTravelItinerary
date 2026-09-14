@@ -44,6 +44,7 @@ function createTestApi() {
     setTravelers: vi.fn((adults: number, children: number) => {
       snapshot = { ...snapshot, state: { ...snapshot.state, adults, children } }
     }),
+    navigate: vi.fn(),
     selectHotel: vi.fn((hotelId: string) => {
       snapshot = { ...snapshot, state: { ...snapshot.state, selectedHotelId: hotelId }, selectedHotel: getHotel(hotelId) }
     }),
@@ -121,6 +122,7 @@ describe("Voyage WebMCP tools", () => {
       "set_destination",
       "set_trip_dates",
       "set_travelers",
+      "navigate_to",
       "search_stays",
       "get_stay",
       "filter_stays",
@@ -163,6 +165,19 @@ describe("Voyage WebMCP tools", () => {
 
     expect(actions.setFilters).toHaveBeenCalledWith({ minRating: 5, maxPrice: 250, breakfastOnly: true })
     expect(response.stays.map((stay: { id: string }) => stay.id)).toEqual(["maison-lumiere"])
+  })
+
+  it("navigates only to allowlisted Voyage pages", async () => {
+    const { actions, registeredTools } = await setup()
+    const tool = registeredTools.get("navigate_to")!
+
+    expect(await readTool(tool, { page: "stays" })).toMatchObject({
+      ok: true,
+      page: "stays",
+      path: "/stays",
+    })
+    expect(actions.navigate).toHaveBeenCalledWith("stays")
+    expect((await readTool(tool, { page: "https://example.com" })).code).toBe("INVALID_PAGE")
   })
 
   it("adds a compatible stay to the itinerary", async () => {
