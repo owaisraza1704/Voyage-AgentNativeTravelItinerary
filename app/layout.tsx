@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import "@/index.css"
 import { SiteShell } from "@/components/site-shell"
 import { VoyageProvider } from "@/components/voyage-provider"
+import { WebMcpProvider } from "@/components/webmcp-provider"
 
 export const metadata: Metadata = {
   title: "Voyage — Plan your next journey",
@@ -13,7 +14,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body suppressHydrationWarning>
         <VoyageProvider>
-          <SiteShell>{children}</SiteShell>
+          <WebMcpProvider>
+            <SiteShell>{children}</SiteShell>
+          </WebMcpProvider>
         </VoyageProvider>
       </body>
     </html>

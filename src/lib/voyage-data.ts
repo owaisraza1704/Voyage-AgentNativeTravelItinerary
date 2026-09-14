@@ -163,7 +163,7 @@ export const destinations: Destination[] = [
     country: "South Korea",
     tagline: "Bright and grounded",
     description: "Mountain paths, bold design, and a food culture that keeps the city awake.",
-    image: "https://images.unsplash.com/photo-1538485399081-7c897e9e2f9b?w=600&h=800&fit=crop&auto=format",
+    image: "https://images.unsplash.com/photo-1538485399081-7191377e8241?w=600&h=800&fit=crop&auto=format",
   },
 ]
 

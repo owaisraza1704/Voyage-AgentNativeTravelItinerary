@@ -53,6 +53,11 @@ export default function PlanPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const destination = getDestination(state.destinationId)
+    if (destination) setDestinationQuery(`${destination.name}, ${destination.country}`)
+  }, [state.destinationId])
+
   const matchingDestinations = destinations.filter((destination) => `${destination.name}, ${destination.country}`.toLowerCase().includes(destinationQuery.toLowerCase()))
   const visibleDays = calendarDays(viewDate)
   const previewEnd = draftEndDate ?? (selectionStep === "check-out" ? hoveredDate : null)
