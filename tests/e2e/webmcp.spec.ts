@@ -75,6 +75,7 @@ test("WebMCP completes a trip setup, booking, and cancellation flow", async ({
     await executeTool(page, "set_destination", { destinationId: "seoul" }),
   )
   expect(destinationResult.ok).toBe(true)
+  await expect(page).toHaveURL(/\/plan\?destination=seoul$/)
   await expect(page.getByLabel("Destination")).toHaveValue(
     "Seoul, South Korea",
   )
@@ -188,7 +189,7 @@ test("WebMCP completes a trip setup, booking, and cancellation flow", async ({
   await expect(page.getByText("No booked itinerary yet.")).toBeVisible()
 })
 
-test("the agent panel executes a WebMCP tool and updates the planner", async ({
+test("the command dock executes a WebMCP tool and updates the planner", async ({
   page,
 }) => {
   await page.goto("/plan")
@@ -226,22 +227,26 @@ test("the agent panel executes a WebMCP tool and updates the planner", async ({
   })
 
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
+  await page.getByRole("button", { name: "Details" }).click()
   await expect(page.getByText("19 tools connected")).toBeVisible()
-  await page.getByRole("button", { name: "Set my destination to Seoul." }).click()
+  await page.getByPlaceholder("Ask Voyage anything...").fill("Set my destination to Seoul.")
+  await page.getByRole("button", { name: "Send" }).click()
 
-  await expect(page.getByText("Seoul is ready for your trip.")).toBeVisible()
+  await expect(page.getByText("Seoul is ready for your trip.").last()).toBeVisible()
+  await expect(page).toHaveURL(/\/plan\?destination=seoul$/)
   await expect(page.getByLabel("Destination")).toHaveValue(
     "Seoul, South Korea",
   )
 
-  await page.getByRole("button", { name: "Close assistant" }).click()
-  await expect(page.getByRole("complementary", { name: "Voyage AI assistant" })).not.toBeVisible()
+  await page.getByRole("button", { name: "Close Voyage dock" }).click()
+  await expect(page.getByRole("dialog", { name: "Voyage command dock" })).not.toBeVisible()
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
-  await expect(page.getByText("Seoul is ready for your trip.")).toBeVisible()
+  await expect(page.getByText("Seoul is ready for your trip.").last()).toBeVisible()
 
   await page.getByRole("button", { name: "Clear chat" }).click()
-  await expect(page.getByText("Seoul is ready for your trip.")).not.toBeVisible()
-  await expect(page.getByRole("button", { name: "Set my destination to Seoul." })).toBeVisible()
+  await expect(page.getByText("Seoul is ready for your trip.").last()).not.toBeVisible()
+  await page.getByRole("button", { name: "Details" }).click()
+  await expect(page.getByText("Your conversation and Voyage’s actions will appear here.")).toBeVisible()
 })
 
 test("the agent requires explicit confirmation before booking", async ({
@@ -285,6 +290,7 @@ test("the agent requires explicit confirmation before booking", async ({
   })
 
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
+  await page.getByRole("button", { name: "Details" }).click()
   await expect(page.getByText("19 tools connected")).toBeVisible()
   await page.getByPlaceholder("Ask Voyage anything...").fill("Prepare my booking")
   await page.getByRole("button", { name: "Send" }).click()
@@ -292,13 +298,13 @@ test("the agent requires explicit confirmation before booking", async ({
   await expect(page.getByRole("region", { name: "Booking confirmation" })).toBeVisible()
   await expect(page.getByText("Maison Lumière")).toBeVisible()
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeVisible()
-  await expect(page.getByText("Review the booking summary before confirming.")).toBeVisible()
+  await expect(page.getByText("Review the booking summary before confirming.").last()).toBeVisible()
 
   await page.getByPlaceholder("Ask Voyage anything...").fill("yes")
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page).toHaveURL(/\/trips$/)
   await expect(page.getByRole("heading", { name: "My Trips" })).toBeVisible()
-  await expect(page.getByRole("complementary", { name: "Voyage AI assistant" })).not.toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Voyage command dock" })).not.toBeVisible()
 })
 
 test("the agent requires explicit confirmation before cancellation", async ({
@@ -356,6 +362,7 @@ test("the agent requires explicit confirmation before cancellation", async ({
   })
 
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
+  await page.getByRole("button", { name: "Details" }).click()
   await expect(page.getByText("19 tools connected")).toBeVisible()
   await page.getByPlaceholder("Ask Voyage anything...").fill("Cancel my current booking")
   await page.getByRole("button", { name: "Send" }).click()
@@ -364,12 +371,12 @@ test("the agent requires explicit confirmation before cancellation", async ({
   await expect(cancellationCard).toBeVisible()
   await expect(cancellationCard.getByText("Maison Lumière")).toBeVisible()
   await expect(cancellationCard.getByRole("button", { name: "Confirm cancellation" })).toBeVisible()
-  await expect(page.getByText("I can cancel Maison Lumière after your confirmation.")).toBeVisible()
+  await expect(page.getByText("I can cancel Maison Lumière after your confirmation.").last()).toBeVisible()
   await expect(page.getByText("**Maison Lumière**")).not.toBeVisible()
 
   await page.getByPlaceholder("Ask Voyage anything...").fill("yes")
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page).toHaveURL(/\/trips$/)
   await expect(page.getByRole("heading", { name: "My Trips" })).toBeVisible()
-  await expect(page.getByRole("complementary", { name: "Voyage AI assistant" })).not.toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Voyage command dock" })).not.toBeVisible()
 })

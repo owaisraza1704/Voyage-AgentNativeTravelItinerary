@@ -56,9 +56,9 @@ test("transcribes microphone input into the agent message field", async ({ page 
 
   await page.goto("/plan")
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
-  await page.getByRole("button", { name: "Use voice input" }).click()
-  await expect(page.getByRole("button", { name: "Stop voice input" })).toBeVisible()
-  await page.getByRole("button", { name: "Stop voice input" }).click()
+  await page.getByRole("button", { name: "Start voice input" }).first().click()
+  await expect(page.getByRole("button", { name: "Stop voice input" }).first()).toBeVisible()
+  await page.getByRole("button", { name: "Stop voice input" }).first().click()
 
   await expect(page.getByPlaceholder("Ask Voyage anything...")).toHaveValue("Plan a trip to Seoul")
 })

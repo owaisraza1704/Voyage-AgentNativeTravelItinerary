@@ -19,7 +19,10 @@ export function WebMcpProvider({ children }: Readonly<{ children: React.ReactNod
     const controller = new AbortController()
     registerVoyageTools(modelContext, {
       getSnapshot: () => voyageRef.current,
-      setDestination: (destinationId) => voyageRef.current.setDestination(destinationId),
+      setDestination: (destinationId) => {
+        voyageRef.current.setDestination(destinationId)
+        router.push(`${voyagePagePaths.planner}?destination=${encodeURIComponent(destinationId)}`)
+      },
       setDates: (startDate, endDate) => voyageRef.current.setDates(startDate, endDate),
       setTravelers: (adults, children) => voyageRef.current.setTravelers(adults, children),
       selectHotel: (hotelId) => voyageRef.current.selectHotel(hotelId),
