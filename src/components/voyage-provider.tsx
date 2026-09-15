@@ -253,17 +253,30 @@ export function VoyageProvider({
       taxes,
       bookingError,
       bookingsLoading,
-      setDestination: (destinationId) =>
-        dispatch({ type: "destination/set", destinationId }),
-      setDates: (startDate, endDate) =>
-        dispatch({ type: "dates/set", startDate, endDate }),
-      setTravelers: (adults, children) =>
-        dispatch({ type: "travelers/set", adults, children }),
-      selectHotel: (hotelId) => dispatch({ type: "hotel/select", hotelId }),
-      removeHotel: () => dispatch({ type: "hotel/remove" }),
-      setFilters: (filters) => dispatch({ type: "filters/update", filters }),
-      setSort: (sort) => dispatch({ type: "sort/set", sort }),
-      resetFilters: () => dispatch({ type: "filters/reset" }),
+      setDestination: (destinationId) => {
+        if (!state.bookedItinerary) dispatch({ type: "destination/set", destinationId })
+      },
+      setDates: (startDate, endDate) => {
+        if (!state.bookedItinerary) dispatch({ type: "dates/set", startDate, endDate })
+      },
+      setTravelers: (adults, children) => {
+        if (!state.bookedItinerary) dispatch({ type: "travelers/set", adults, children })
+      },
+      selectHotel: (hotelId) => {
+        if (!state.bookedItinerary) dispatch({ type: "hotel/select", hotelId })
+      },
+      removeHotel: () => {
+        if (!state.bookedItinerary) dispatch({ type: "hotel/remove" })
+      },
+      setFilters: (filters) => {
+        if (!state.bookedItinerary) dispatch({ type: "filters/update", filters })
+      },
+      setSort: (sort) => {
+        if (!state.bookedItinerary) dispatch({ type: "sort/set", sort })
+      },
+      resetFilters: () => {
+        if (!state.bookedItinerary) dispatch({ type: "filters/reset" })
+      },
       confirmBooking: async () => {
         setBookingError(null);
         const response = await fetch("/api/bookings", {

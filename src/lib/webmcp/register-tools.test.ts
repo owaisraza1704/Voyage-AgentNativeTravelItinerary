@@ -147,6 +147,35 @@ describe("Voyage WebMCP tools", () => {
     expect((await readTool(tool, { destinationId: "unknown" })).code).toBe("DESTINATION_NOT_FOUND")
   })
 
+  it("blocks itinerary changes while a booking is active", async () => {
+    const testApi = await setup()
+    const snapshot = testApi.actions.getSnapshot()
+    Object.assign(snapshot, { state: { ...snapshot.state, bookedItinerary: booking } })
+
+    const blockedActions: Array<[string, Record<string, unknown>]> = [
+      ["set_destination", { destinationId: "seoul" }],
+      ["set_trip_dates", { startDate: "2026-09-19", endDate: "2026-09-26" }],
+      ["set_travelers", { adults: 3 }],
+      ["filter_stays", { minRating: 5 }],
+      ["sort_stays", { sort: "price-asc" }],
+      ["add_stay_to_itinerary", { hotelId: "maison-lumiere" }],
+      ["remove_stay_from_itinerary", {}],
+      ["get_booking_summary", {}],
+      ["book_itinerary", { confirmation: "confirmed" }],
+    ]
+
+    for (const [name, input] of blockedActions) {
+      expect((await readTool(testApi.registeredTools.get(name)!, input)).code).toBe("ACTIVE_BOOKING_EXISTS")
+    }
+
+    expect(testApi.actions.setDestination).not.toHaveBeenCalled()
+    expect(testApi.actions.setDates).not.toHaveBeenCalled()
+    expect(testApi.actions.setTravelers).not.toHaveBeenCalled()
+    expect(testApi.actions.setFilters).not.toHaveBeenCalled()
+    expect(testApi.actions.setSort).not.toHaveBeenCalled()
+    expect(testApi.actions.selectHotel).not.toHaveBeenCalled()
+  })
+
   it("rejects invalid dates before changing trip state", async () => {
     const { actions, registeredTools } = await setup()
     const tool = registeredTools.get("set_trip_dates")!

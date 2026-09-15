@@ -157,7 +157,7 @@ export const destinations: Destination[] = [
     description:
       "Tile-lined streets, Atlantic air, and a warm city made for slow afternoons.",
     image:
-      "https://images.unsplash.com/photo-1555881400-74d7acaacb023?w=600&h=800&fit=crop&auto=format",
+      "https://images.unsplash.com/photo-1501927023255-9063be98970c?w=600&h=800&fit=crop&auto=format",
   },
   {
     id: "cape-town",

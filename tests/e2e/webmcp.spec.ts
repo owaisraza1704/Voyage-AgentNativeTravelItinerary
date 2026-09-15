@@ -294,7 +294,8 @@ test("the agent requires explicit confirmation before booking", async ({
   await expect(page.getByRole("button", { name: "Confirm booking" })).toBeVisible()
   await expect(page.getByText("Review the booking summary before confirming.")).toBeVisible()
 
-  await page.getByRole("button", { name: "Confirm booking" }).click()
+  await page.getByPlaceholder("Ask Voyage anything...").fill("yes")
+  await page.getByRole("button", { name: "Send" }).click()
   await expect(page).toHaveURL(/\/trips$/)
   await expect(page.getByRole("heading", { name: "My Trips" })).toBeVisible()
   await expect(page.getByRole("complementary", { name: "Voyage AI assistant" })).not.toBeVisible()
@@ -366,7 +367,8 @@ test("the agent requires explicit confirmation before cancellation", async ({
   await expect(page.getByText("I can cancel Maison Lumière after your confirmation.")).toBeVisible()
   await expect(page.getByText("**Maison Lumière**")).not.toBeVisible()
 
-  await cancellationCard.getByRole("button", { name: "Confirm cancellation" }).click()
+  await page.getByPlaceholder("Ask Voyage anything...").fill("yes")
+  await page.getByRole("button", { name: "Send" }).click()
   await expect(page).toHaveURL(/\/trips$/)
   await expect(page.getByRole("heading", { name: "My Trips" })).toBeVisible()
   await expect(page.getByRole("complementary", { name: "Voyage AI assistant" })).not.toBeVisible()

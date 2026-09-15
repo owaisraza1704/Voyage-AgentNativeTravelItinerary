@@ -20,6 +20,15 @@ function result(payload: Record<string, unknown>): WebMcpResult {
   return { content: [{ type: "text", text: JSON.stringify(payload) }] }
 }
 
+function activeBookingGuard(snapshot: VoyageContextValue, action: string) {
+  if (!snapshot.state.bookedItinerary) return null
+  return result({
+    ok: false,
+    code: "ACTIVE_BOOKING_EXISTS",
+    message: `You already have an active booking. Cancel it from My Trips before you can ${action}.`,
+  })
+}
+
 function inputObject(input: unknown) {
   return typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {}
 }
@@ -135,6 +144,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       description: "Set the destination for the current Voyage trip.",
       inputSchema: { type: "object", properties: { destinationId: { type: "string" } }, required: ["destinationId"], additionalProperties: false },
       execute: (rawInput) => {
+        const blocked = activeBookingGuard(actions.getSnapshot(), "change the destination")
+        if (blocked) return blocked
         const destinationId = inputString(inputObject(rawInput), "destinationId")
         const destination = destinationId ? getDestination(destinationId) : undefined
         if (!destination) return result({ ok: false, code: "DESTINATION_NOT_FOUND", message: "That destination is not available in Voyage." })
@@ -147,6 +158,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       description: "Set valid ISO check-in and check-out dates for the current trip.",
       inputSchema: { type: "object", properties: { startDate: { type: "string" }, endDate: { type: "string" } }, required: ["startDate", "endDate"], additionalProperties: false },
       execute: (rawInput) => {
+        const blocked = activeBookingGuard(actions.getSnapshot(), "change the travel dates")
+        if (blocked) return blocked
         const input = inputObject(rawInput)
         const startDate = inputString(input, "startDate")
         const endDate = inputString(input, "endDate")
@@ -161,6 +174,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       description: "Set the number of adults and children for the current trip.",
       inputSchema: { type: "object", properties: { adults: { type: "number", minimum: 1 }, children: { type: "number", minimum: 0 } }, required: ["adults"], additionalProperties: false },
       execute: (rawInput) => {
+        const blocked = activeBookingGuard(actions.getSnapshot(), "change the travelers")
+        if (blocked) return blocked
         const input = inputObject(rawInput)
         const adults = inputNumber(input, "adults")
         const children = input.children === undefined ? 0 : inputNumber(input, "children")
@@ -208,6 +223,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       description: "Apply price, rating, location, amenities, and breakfast filters to current stay results.",
       inputSchema: { type: "object", properties: { minPrice: { type: "number" }, maxPrice: { type: "number" }, minRating: { type: "number" }, maxRating: { type: "number" }, location: { type: "string" }, amenities: { type: "array", items: { type: "string" } }, breakfastIncluded: { type: "boolean" } }, additionalProperties: false },
       execute: (rawInput) => {
+        const blocked = activeBookingGuard(actions.getSnapshot(), "change stay filters")
+        if (blocked) return blocked
         const patch = filterPatch(inputObject(rawInput))
         if (!patch) return result({ ok: false, code: "INVALID_FILTERS", message: "Filter values have the wrong types." })
         const current = actions.getSnapshot()
@@ -222,6 +239,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       description: "Sort current stays by recommendation, price, or rating.",
       inputSchema: { type: "object", properties: { sort: { type: "string", enum: ["recommended", "price-asc", "price-desc", "rating-desc"] } }, required: ["sort"], additionalProperties: false },
       execute: (rawInput) => {
+        const blocked = activeBookingGuard(actions.getSnapshot(), "change stay sorting")
+        if (blocked) return blocked
         const sort = inputString(inputObject(rawInput), "sort")
         if (!sort || !["recommended", "price-asc", "price-desc", "rating-desc"].includes(sort)) return result({ ok: false, code: "INVALID_SORT", message: "Use recommended, price-asc, price-desc, or rating-desc." })
         actions.setSort(sort as StaySort)
@@ -237,7 +256,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
         const hotelId = inputString(inputObject(rawInput), "hotelId")
         const snapshot = actions.getSnapshot()
         const hotel = hotelId ? getHotel(hotelId) : undefined
-        if (snapshot.state.bookedItinerary) return result({ ok: false, code: "ACTIVE_BOOKING_EXISTS", message: "Cancel the existing booking before creating another itinerary." })
+        const blocked = activeBookingGuard(snapshot, "select a new stay")
+        if (blocked) return blocked
         if (!hotel) return result({ ok: false, code: "STAY_NOT_FOUND", message: "That stay is not available in Voyage." })
         if (hotel.destinationId !== snapshot.state.destinationId) return result({ ok: false, code: "DESTINATION_MISMATCH", message: "That stay belongs to a different destination." })
         actions.selectHotel(hotel.id)
@@ -249,7 +269,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       description: "Remove the selected stay from the unconfirmed itinerary.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       execute: () => {
-        if (actions.getSnapshot().state.bookedItinerary) return result({ ok: false, code: "ACTIVE_BOOKING_EXISTS", message: "The confirmed booking must be cancelled from My Trips." })
+        const blocked = activeBookingGuard(actions.getSnapshot(), "remove the current stay")
+        if (blocked) return blocked
         actions.removeHotel()
         return result({ ok: true, itinerary: { ...tripSummary(actions.getSnapshot()), selectedStay: null, total: 0 } })
       },
@@ -276,6 +297,8 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       execute: () => {
         const snapshot = actions.getSnapshot()
+        const blocked = activeBookingGuard(snapshot, "prepare a new booking")
+        if (blocked) return blocked
         if (!snapshot.selectedHotel) return result({ ok: false, code: "NO_STAY_SELECTED", message: "Select a stay before requesting a booking summary." })
         return result({ ok: true, summary: tripSummary(snapshot), requiresConfirmation: !snapshot.state.bookedItinerary })
       },
@@ -286,8 +309,9 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       inputSchema: { type: "object", properties: { confirmation: { type: "string", enum: ["confirmed"] } }, required: ["confirmation"], additionalProperties: false },
       execute: async (rawInput) => {
         const snapshot = actions.getSnapshot()
+        const blocked = activeBookingGuard(snapshot, "create another booking")
+        if (blocked) return blocked
         if (inputString(inputObject(rawInput), "confirmation") !== "confirmed") return result({ ok: false, code: "CONFIRMATION_REQUIRED", message: "The user must explicitly confirm the booking after reviewing the summary." })
-        if (snapshot.state.bookedItinerary) return result({ ok: false, code: "ACTIVE_BOOKING_EXISTS", message: "Cancel the existing booking before creating another itinerary." })
         if (!snapshot.selectedHotel) return result({ ok: false, code: "NO_STAY_SELECTED", message: "Select a stay before booking." })
         const booking = await actions.confirmBooking()
         return booking ? result({ ok: true, booking }) : result({ ok: false, code: "BOOKING_FAILED", message: "Voyage could not create the booking." })

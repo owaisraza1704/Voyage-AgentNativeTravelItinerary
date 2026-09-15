@@ -12,6 +12,14 @@ import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
 
 const maxAgentTurns = 12
 
+function isAffirmativeReply(value: string) {
+  return /^(yes|yeah|yep|yup|confirm|confirmed|go ahead|do it|proceed|please do)([.!?,\s]|$)/i.test(value.trim())
+}
+
+function isNegativeReply(value: string) {
+  return /^(no|nope|don't|do not|keep it|keep booking|keep planning|never mind)([.!?,\s]|$)/i.test(value.trim())
+}
+
 export function SiteShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const [agentOpen, setAgentOpen] = useState(false)
   const { state } = useVoyage()
@@ -96,6 +104,7 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const recorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const conversationEndRef = useRef<HTMLDivElement>(null)
   const { state } = useVoyage()
   const router = useRouter()
 
@@ -120,6 +129,15 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
     }
   }, [open])
 
+  useEffect(() => {
+    if (!open) return
+
+    const frame = window.requestAnimationFrame(() => {
+      conversationEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, conversation, bookingSummary, cancellationSummary, isThinking])
+
   async function requestAgent(messages: AgentMessage[], tools: AgentTool[]) {
     const toolDefinitions = tools.map((tool) => ({
       name: tool.name,
@@ -142,6 +160,28 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
 
     setMessage("")
     setConversation((current) => [...current, { role: "user", content: trimmed }])
+
+    if (isAffirmativeReply(trimmed) && bookingSummary) {
+      await confirmBooking()
+      return
+    }
+
+    if (isAffirmativeReply(trimmed) && cancellationSummary) {
+      await confirmCancellation()
+      return
+    }
+
+    if (isNegativeReply(trimmed) && (bookingSummary || cancellationSummary)) {
+      setBookingSummary(null)
+      setCancellationSummary(null)
+      setBookingError(null)
+      setConversation((current) => [
+        ...current,
+        { role: "assistant", content: "Understood. I won't change your booking." },
+      ])
+      return
+    }
+
     setIsThinking(true)
 
     try {
@@ -202,6 +242,15 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
                 toolResult = { ok: false, code: "TOOL_EXECUTION_FAILED", message: error instanceof Error ? error.message : "The WebMCP tool failed." }
               }
             }
+          }
+
+          const blockedResult = toolResult as { code?: string; message?: string }
+          if (blockedResult.code === "ACTIVE_BOOKING_EXISTS") {
+            setConversation((current) => [
+              ...current,
+              { role: "assistant", content: blockedResult.message ?? "You already have an active booking. Cancel it from My Trips before planning another itinerary." },
+            ])
+            return
           }
 
           messages = [
@@ -405,9 +454,6 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
             {toolError && <p className="mt-3 text-center text-xs text-red-900">{toolError}</p>}
           </div>
 
-          {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { setBookingSummary(null); setBookingError(null) }} />}
-          {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { setCancellationSummary(null); setBookingError(null) }} />}
-
           <div className="mt-8 space-y-4">
             {conversation.length === 0 ? (
               <button onClick={() => void submitMessage("Set my destination to Seoul.")} disabled={toolStatus !== "connected" || isThinking} className="w-full border border-sand p-4 text-left text-sm leading-relaxed transition-colors hover:border-charcoal disabled:cursor-not-allowed disabled:opacity-50">
@@ -416,6 +462,9 @@ function AgentPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
               </button>
             ) : conversation.map((item, index) => <p key={`${item.role}-${item.content}-${index}`} className={`whitespace-pre-line border-l-2 pl-4 text-sm leading-relaxed ${item.role === "user" ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{formatAgentText(item.content)}</p>)}
             {isThinking && <p className="border-l-2 border-gold pl-4 text-sm text-taupe">Voyage is thinking…</p>}
+            {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { setBookingSummary(null); setBookingError(null) }} />}
+            {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { setCancellationSummary(null); setBookingError(null) }} />}
+            <div ref={conversationEndRef} aria-hidden="true" />
           </div>
         </div>
 
