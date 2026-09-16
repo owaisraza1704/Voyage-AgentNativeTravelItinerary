@@ -6,7 +6,9 @@ export type RealtimeVoiceStatus =
   | "error"
 
 export type RealtimeVoiceEvent =
+  | { type: "user-transcript-delta"; text: string }
   | { type: "user-transcript"; text: string }
+  | { type: "assistant-transcript-delta"; text: string }
   | { type: "assistant-transcript"; text: string }
   | { type: "user-speech-started" }
   | { type: "user-speech-stopped" }
@@ -28,8 +30,20 @@ type RealtimeSessionResponse = {
 export function parseRealtimeServerEvent(value: unknown): RealtimeVoiceEvent[] {
   if (!value || typeof value !== "object") return []
 
-  const event = value as { type?: unknown; transcript?: unknown }
+  const event = value as {
+    type?: unknown
+    delta?: unknown
+    transcript?: unknown
+  }
   if (typeof event.type !== "string") return []
+
+  if (
+    event.type === "conversation.item.input_audio_transcription.delta" &&
+    typeof event.delta === "string" &&
+    event.delta
+  ) {
+    return [{ type: "user-transcript-delta", text: event.delta }]
+  }
 
   if (
     event.type === "conversation.item.input_audio_transcription.completed" &&
@@ -37,6 +51,15 @@ export function parseRealtimeServerEvent(value: unknown): RealtimeVoiceEvent[] {
     event.transcript.trim()
   ) {
     return [{ type: "user-transcript", text: event.transcript.trim() }]
+  }
+
+  if (
+    (event.type === "response.output_audio_transcript.delta" ||
+      event.type === "response.audio_transcript.delta") &&
+    typeof event.delta === "string" &&
+    event.delta
+  ) {
+    return [{ type: "assistant-transcript-delta", text: event.delta }]
   }
 
   if (

@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest"
 import { parseRealtimeServerEvent } from "./realtime-client"
 
 describe("Realtime server events", () => {
+  it("returns incremental transcript deltas", () => {
+    expect(
+      parseRealtimeServerEvent({
+        type: "conversation.item.input_audio_transcription.delta",
+        delta: "Plan a trip",
+      }),
+    ).toEqual([{ type: "user-transcript-delta", text: "Plan a trip" }])
+
+    expect(
+      parseRealtimeServerEvent({
+        type: "response.output_audio_transcript.delta",
+        delta: "Paris is",
+      }),
+    ).toEqual([{ type: "assistant-transcript-delta", text: "Paris is" }])
+  })
+
   it("returns completed user and assistant transcripts", () => {
     expect(
       parseRealtimeServerEvent({

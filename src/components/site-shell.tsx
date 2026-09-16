@@ -33,6 +33,12 @@ function isRealtimeVoiceActive(status: RealtimeVoiceStatus) {
   return status === "connecting" || status === "listening" || status === "speaking"
 }
 
+type ConversationMessage = {
+  role: "user" | "assistant"
+  content: string
+  streaming?: boolean
+}
+
 export function SiteShell({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -171,10 +177,7 @@ function VoyageCommandDock({
   onClose: () => void
 }) {
   const [message, setMessage] = useState("")
-  const [conversation, setConversation] = useState<Array<{
-    role: "user" | "assistant"
-    content: string
-  }>>([])
+  const [conversation, setConversation] = useState<ConversationMessage[]>([])
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([])
   const [availableTools, setAvailableTools] = useState<AgentTool[]>([])
   const [toolStatus, setToolStatus] =
@@ -439,18 +442,49 @@ function VoyageCommandDock({
       onStatusChange: setVoiceStatus,
       onError: setVoiceError,
       onEvent: (event: RealtimeVoiceEvent) => {
-        if (event.type === "user-transcript") {
-          setConversation((current) => [
-            ...current,
-            { role: "user", content: event.text },
-          ])
+        if (event.type === "user-speech-started") {
+          setConversation((current) => {
+            const last = current[current.length - 1]
+            if (last?.role === "user" && last.streaming && !last.content) {
+              return current
+            }
+            return [...current, { role: "user", content: "", streaming: true }]
+          })
+          return
         }
-        if (event.type === "assistant-transcript") {
-          setConversation((current) => [
+
+        const isUserTranscript = event.type.startsWith("user-transcript")
+        const isAssistantTranscript = event.type.startsWith("assistant-transcript")
+        if (!isUserTranscript && !isAssistantTranscript) return
+        if (!("text" in event)) return
+
+        const role = isUserTranscript ? "user" : "assistant"
+        const isDelta = event.type.endsWith("-delta")
+        setConversation((current) => {
+          let streamingIndex = -1
+          for (let index = current.length - 1; index >= 0; index -= 1) {
+            if (current[index].role === role && current[index].streaming) {
+              streamingIndex = index
+              break
+            }
+          }
+
+          if (streamingIndex >= 0) {
+            const updated = [...current]
+            const previous = updated[streamingIndex]
+            updated[streamingIndex] = {
+              ...previous,
+              content: isDelta ? `${previous.content}${event.text}` : event.text,
+              streaming: isDelta,
+            }
+            return updated
+          }
+
+          return [
             ...current,
-            { role: "assistant", content: event.text },
-          ])
-        }
+            { role, content: event.text, streaming: isDelta },
+          ]
+        })
       },
     })
     realtimeSessionRef.current = session
@@ -638,7 +672,7 @@ function VoyageCommandDock({
           </div>
           <div className="space-y-3 pr-1">
             {conversation.length === 0 && <p className="text-xs text-taupe">Your conversation and Voyage’s actions will appear here.</p>}
-            {conversation.map((item, index) => <p key={`${item.role}-${item.content}-${index}`} className={`whitespace-pre-line border-l-2 pl-3 text-xs leading-relaxed ${item.role === "user" ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{formatAgentText(item.content)}</p>)}
+            {conversation.map((item, index) => item.content && <p key={`${item.role}-${item.content}-${index}`} className={`whitespace-pre-line border-l-2 pl-3 text-xs leading-relaxed ${item.role === "user" ? "border-charcoal text-charcoal" : "border-gold text-taupe"}`}>{formatAgentText(item.content)}</p>)}
             {isThinking && <p className="border-l-2 border-gold pl-3 text-xs text-taupe">Voyage is thinking…</p>}
             <div ref={conversationEndRef} aria-hidden="true" />
           </div>

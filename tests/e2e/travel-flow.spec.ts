@@ -108,12 +108,31 @@ test("connects the realtime microphone session and receives transcript events", 
   await page.evaluate(() => {
     const channel = (globalThis as Record<string, { emit: (event: Record<string, unknown>) => void }>).__voyageDataChannel
     channel.emit({
+      type: "input_audio_buffer.speech_started",
+    })
+    channel.emit({
+      type: "response.output_audio_transcript.delta",
+      delta: "I can help with that.",
+    })
+    channel.emit({
+      type: "response.output_audio_transcript.done",
+      transcript: "I can help with that.",
+    })
+    channel.emit({
+      type: "conversation.item.input_audio_transcription.delta",
+      delta: "Plan a trip",
+    })
+    channel.emit({
       type: "conversation.item.input_audio_transcription.completed",
       transcript: "Plan a trip to Seoul",
     })
   })
   await page.getByRole("button", { name: "Details" }).click()
-  await expect(page.getByText("Plan a trip to Seoul").last()).toBeVisible()
+  await expect(page.getByText("Plan a trip to Seoul", { exact: true }).last()).toBeVisible()
+  await expect(page.locator(".bg-mist p.border-l-2")).toHaveText([
+    "Plan a trip to Seoul",
+    "I can help with that.",
+  ])
 
   await expect(page.getByRole("button", { name: "Stop voice input" }).first()).toBeVisible()
   await page.getByRole("button", { name: "Stop voice input" }).first().click()
