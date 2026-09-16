@@ -9,6 +9,11 @@ import type { AgentMessage, AgentTool, AgentResponse } from "@/lib/agent-types"
 import type { BookingRecord } from "@/lib/booking-types"
 import { formatDateRange, formatPrice } from "@/lib/voyage-data"
 import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
+import {
+  createRealtimeVoiceSession,
+  type RealtimeVoiceEvent,
+  type RealtimeVoiceStatus,
+} from "@/lib/realtime/realtime-client"
 
 const maxAgentTurns = 12
 
@@ -22,6 +27,10 @@ function isNegativeReply(value: string) {
   return /^(no|nope|don't|do not|keep it|keep booking|keep planning|never mind)([.!?,\s]|$)/i.test(
     value.trim(),
   )
+}
+
+function isRealtimeVoiceActive(status: RealtimeVoiceStatus) {
+  return status === "connecting" || status === "listening" || status === "speaking"
 }
 
 export function SiteShell({
@@ -178,13 +187,11 @@ function VoyageCommandDock({
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [cancellationSummary, setCancellationSummary] =
     useState<BookingRecord | null>(null)
-  const [isRecording, setIsRecording] = useState(false)
-  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState<RealtimeVoiceStatus>("idle")
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
+  const realtimeAudioRef = useRef<HTMLAudioElement>(null)
+  const realtimeSessionRef = useRef<ReturnType<typeof createRealtimeVoiceSession> | null>(null)
   const conversationEndRef = useRef<HTMLDivElement>(null)
   const { state } = useVoyage()
   const router = useRouter()
@@ -211,6 +218,10 @@ function VoyageCommandDock({
       disposed = true
     }
   }, [open])
+
+  useEffect(() => {
+    return () => realtimeSessionRef.current?.close()
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -245,7 +256,7 @@ function VoyageCommandDock({
 
   async function submitMessage(value: string) {
     const trimmed = value.trim()
-    if (!trimmed || isThinking || isRecording || isTranscribing) return
+    if (!trimmed || isThinking || isRealtimeVoiceActive(voiceStatus)) return
 
     setMessage("")
     setConversation((current) => [
@@ -410,99 +421,44 @@ function VoyageCommandDock({
     }
   }
 
-  async function transcribeAudio(audio: Blob) {
-    setIsTranscribing(true)
-    setVoiceError(null)
-
-    try {
-      const formData = new FormData()
-      const extension = audio.type.includes("mp4") ? "mp4" : "webm"
-      formData.append("audio", audio, `voyage-recording.${extension}`)
-      const response = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      })
-      const payload = (await response.json()) as {
-        text?: string
-        error?: string
-      }
-      if (!response.ok)
-        throw new Error(payload.error ?? "Voice transcription failed.")
-      if (!payload.text?.trim()) throw new Error("No speech was detected.")
-
-      setMessage((current) =>
-        current.trim()
-          ? `${current.trim()} ${payload.text?.trim()}`
-          : (payload.text?.trim() ?? ""),
-      )
-    } catch (error: unknown) {
-      setVoiceError(
-        error instanceof Error ? error.message : "Voice transcription failed.",
-      )
-    } finally {
-      setIsTranscribing(false)
-    }
-  }
-
   async function toggleVoiceInput() {
-    if (isTranscribing) return
-    if (isRecording) {
-      recorderRef.current?.stop()
+    if (isThinking) return
+    if (isRealtimeVoiceActive(voiceStatus)) {
+      realtimeSessionRef.current?.close()
+      realtimeSessionRef.current = null
       return
     }
 
-    if (
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof MediaRecorder === "undefined"
-    ) {
-      setVoiceError("Voice input is not supported in this browser.")
+    if (!realtimeAudioRef.current) {
+      setVoiceError("Voice playback is not ready yet.")
       return
     }
 
     setVoiceError(null)
+    const session = createRealtimeVoiceSession(realtimeAudioRef.current, {
+      onStatusChange: setVoiceStatus,
+      onError: setVoiceError,
+      onEvent: (event: RealtimeVoiceEvent) => {
+        if (event.type === "user-transcript") {
+          setConversation((current) => [
+            ...current,
+            { role: "user", content: event.text },
+          ])
+        }
+        if (event.type === "assistant-transcript") {
+          setConversation((current) => [
+            ...current,
+            { role: "assistant", content: event.text },
+          ])
+        }
+      },
+    })
+    realtimeSessionRef.current = session
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const supportedType = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/mp4",
-      ].find((type) => MediaRecorder.isTypeSupported(type))
-      const recorder = supportedType
-        ? new MediaRecorder(stream, { mimeType: supportedType })
-        : new MediaRecorder(stream)
-
-      audioChunksRef.current = []
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data)
-      }
-      recorder.onstop = () => {
-        const audio = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || "audio/webm",
-        })
-        stream.getTracks().forEach((track) => track.stop())
-        recorderRef.current = null
-        mediaStreamRef.current = null
-        setIsRecording(false)
-        void transcribeAudio(audio)
-      }
-      recorder.onerror = () => {
-        stream.getTracks().forEach((track) => track.stop())
-        recorderRef.current = null
-        mediaStreamRef.current = null
-        setIsRecording(false)
-        setVoiceError("Voice recording failed.")
-      }
-
-      recorderRef.current = recorder
-      mediaStreamRef.current = stream
-      recorder.start()
-      setIsRecording(true)
-    } catch (error: unknown) {
-      setVoiceError(
-        error instanceof Error
-          ? error.message
-          : "Microphone access was denied.",
-      )
+      await session.connect()
+    } catch {
+      realtimeSessionRef.current = null
     }
   }
 
@@ -616,17 +572,22 @@ function VoyageCommandDock({
         : "Unavailable"
 
   const latestMessage = conversation[conversation.length - 1]
+  const voiceActive = isRealtimeVoiceActive(voiceStatus)
   const dockStatus = cancellationSummary || bookingSummary
     ? "Confirmation needed"
-    : isRecording
-      ? "Listening"
-      : isTranscribing
-        ? "Transcribing"
-        : isThinking
-          ? "Voyage is working"
-          : toolStatus === "connected"
-            ? "Ready to plan"
-            : toolStatusLabel
+    : voiceStatus === "connecting"
+      ? "Connecting voice"
+      : voiceStatus === "speaking"
+        ? "Voyage is speaking"
+        : voiceStatus === "listening"
+          ? "Listening"
+          : isThinking
+            ? "Voyage is working"
+            : voiceStatus === "error"
+              ? "Voice unavailable"
+              : toolStatus === "connected"
+                ? "Ready to plan"
+                : toolStatusLabel
 
   return (
     <div className="fixed left-1/2 top-[4.75rem] z-50 w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2" role="dialog" aria-label="Voyage command dock">
@@ -634,25 +595,25 @@ function VoyageCommandDock({
         <div className="flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-5">
           <button
             onClick={() => void toggleVoiceInput()}
-            disabled={isThinking || isTranscribing}
-            className={`relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${isRecording ? "border-gold bg-gold text-ivory" : "border-charcoal bg-charcoal text-ivory hover:bg-gold"}`}
-            aria-label={isRecording ? "Stop voice input" : "Start voice input"}
-            aria-pressed={isRecording}
+            disabled={isThinking}
+            className={`relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${voiceActive ? "border-gold bg-gold text-ivory" : "border-charcoal bg-charcoal text-ivory hover:bg-gold"}`}
+            aria-label={voiceActive ? "Stop voice input" : "Start voice input"}
+            aria-pressed={voiceActive}
           >
-            {isRecording && <span className="voice-dock-pulse absolute inset-0 rounded-full border border-gold" />}
+            {voiceActive && <span className="voice-dock-pulse absolute inset-0 rounded-full border border-gold" />}
             <MicIcon className="relative z-10 h-4 w-4" />
           </button>
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${isRecording || isThinking ? "bg-gold" : "bg-green-700"}`} />
+              <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${voiceActive || isThinking ? "bg-gold" : "bg-green-700"}`} />
               <p className="truncate text-[10px] uppercase tracking-[0.18em] text-gold" aria-live="polite">{dockStatus}</p>
             </div>
             <p className="mt-1 truncate text-xs text-taupe" aria-live="polite">{latestMessage ? formatAgentText(latestMessage.content) : "Ask Voyage anything..."}</p>
           </div>
 
           <div className="hidden h-7 items-center gap-0.5 border-l border-sand pl-4 sm:flex">
-            {Array.from({ length: 12 }).map((_, index) => <span key={index} className={`w-0.5 rounded-full bg-gold ${isRecording || isThinking ? "voice-bar" : "h-1 opacity-35"}`} style={{ animationDelay: `${index * 55}ms` }} />)}
+            {Array.from({ length: 12 }).map((_, index) => <span key={index} className={`w-0.5 rounded-full bg-gold ${voiceActive || isThinking ? "voice-bar" : "h-1 opacity-35"}`} style={{ animationDelay: `${index * 55}ms` }} />)}
           </div>
 
           <button onClick={() => setDetailsOpen((value) => !value)} className="hidden px-2 text-[10px] uppercase tracking-[0.14em] text-taupe transition-colors hover:text-charcoal sm:block" aria-expanded={detailsOpen}>{detailsOpen ? "Less" : "Details"}</button>
@@ -662,11 +623,13 @@ function VoyageCommandDock({
 
         <form onSubmit={(event) => { event.preventDefault(); void submitMessage(message) }} className="flex items-center gap-2 border-t border-sand px-3 py-2.5 sm:px-5">
           <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask Voyage anything..." className="min-w-0 flex-1 bg-transparent px-1 text-sm text-charcoal outline-none placeholder:text-taupe" aria-label="Ask Voyage" />
-          <button type="button" onClick={() => void toggleVoiceInput()} disabled={isThinking || isTranscribing} className={`p-2 transition-colors disabled:opacity-50 ${isRecording ? "text-red-900" : "text-taupe hover:text-charcoal"}`} aria-label={isRecording ? "Stop voice input" : "Start voice input"}><MicIcon className="h-4 w-4" /></button>
-          <button type="submit" disabled={isThinking || isRecording || isTranscribing || toolStatus !== "connected"} className="bg-charcoal px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-gold disabled:cursor-not-allowed disabled:opacity-50">Send</button>
+          <button type="button" onClick={() => void toggleVoiceInput()} disabled={isThinking} className={`p-2 transition-colors disabled:opacity-50 ${voiceActive ? "text-red-900" : "text-taupe hover:text-charcoal"}`} aria-label={voiceActive ? "Stop voice input" : "Start voice input"}><MicIcon className="h-4 w-4" /></button>
+          <button type="submit" disabled={isThinking || voiceActive || toolStatus !== "connected"} className="bg-charcoal px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-ivory transition-colors hover:bg-gold disabled:cursor-not-allowed disabled:opacity-50">Send</button>
         </form>
 
-        {(isRecording || isTranscribing || voiceError) && <div className="border-t border-sand px-5 py-2 text-center text-xs text-taupe">{isRecording ? "Listening… click the microphone to stop." : isTranscribing ? "Transcribing…" : <span className="text-red-900">{voiceError}</span>}</div>}
+        {(voiceActive || voiceError) && <div className="border-t border-sand px-5 py-2 text-center text-xs text-taupe">{voiceStatus === "connecting" ? "Connecting to Voyage…" : voiceStatus === "speaking" ? "Voyage is speaking…" : voiceActive ? "Listening… click the microphone to stop." : <span className="text-red-900">{voiceError}</span>}</div>}
+
+        <audio ref={realtimeAudioRef} autoPlay className="hidden" aria-hidden="true" />
 
         {detailsOpen && <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-sand bg-mist px-4 py-4 sm:px-5">
           <div className="mb-4 flex items-center justify-between text-[10px] uppercase tracking-[0.16em]">

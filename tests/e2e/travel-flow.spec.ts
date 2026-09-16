@@ -25,7 +25,7 @@ test("allows a traveler to choose a destination and dates", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Check-out 26 September" })).toBeVisible()
 })
 
-test("transcribes microphone input into the agent message field", async ({ page }) => {
+test("connects the realtime microphone session and receives transcript events", async ({ page }) => {
   await page.addInitScript(() => {
     const tracks = [{ stop() {} }]
     Object.defineProperty(navigator, "mediaDevices", {
@@ -33,34 +33,91 @@ test("transcribes microphone input into the agent message field", async ({ page 
       value: { getUserMedia: async () => ({ getTracks: () => tracks }) },
     })
 
-    class MockMediaRecorder {
-      static isTypeSupported() { return true }
-      mimeType = "audio/webm;codecs=opus"
-      ondataavailable: ((event: { data: Blob }) => void) | null = null
-      onstop: (() => void) | null = null
+    class MockDataChannel {
+      readyState = "connecting"
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
       onerror: (() => void) | null = null
-      start() {}
-      stop() {
-        this.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) })
-        this.onstop?.()
+
+      constructor() {
+        ;(globalThis as Record<string, unknown>).__voyageDataChannel = this
+      }
+
+      open() {
+        this.readyState = "open"
+        this.onopen?.()
+      }
+
+      send() {}
+      close() { this.readyState = "closed" }
+      emit(event: Record<string, unknown>) {
+        this.onmessage?.({ data: JSON.stringify(event) })
       }
     }
-    Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: MockMediaRecorder })
+
+    class MockPeerConnection {
+      connectionState = "new"
+      localDescription: { type: "offer"; sdp: string } | null = null
+      ontrack: ((event: { streams: MediaStream[]; track: MediaStreamTrack }) => void) | null = null
+      onconnectionstatechange: (() => void) | null = null
+      dataChannel: MockDataChannel | null = null
+
+      addTrack() {}
+      createDataChannel() {
+        this.dataChannel = new MockDataChannel()
+        setTimeout(() => this.dataChannel?.open(), 0)
+        return this.dataChannel
+      }
+      async createOffer() { return { type: "offer" as const, sdp: "offer-sdp" } }
+      async setLocalDescription(description: { type: "offer"; sdp: string }) {
+        this.localDescription = description
+      }
+      async setRemoteDescription() {
+        this.connectionState = "connected"
+        this.onconnectionstatechange?.()
+      }
+      close() { this.connectionState = "closed" }
+    }
+
+    Object.defineProperty(globalThis, "RTCPeerConnection", {
+      configurable: true,
+      value: MockPeerConnection,
+    })
   })
-  await page.route("**/api/transcribe", async (route) => {
+
+  await page.route("**/api/realtime/session", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ text: "Plan a trip to Seoul" }),
+      body: JSON.stringify({
+        clientSecret: "ek_test-secret",
+        expiresAt: 1_800_000_000,
+        model: "gpt-realtime-2.1",
+        realtimeUrl: "https://example.openai.azure.com/openai/v1/realtime/calls",
+      }),
     })
+  })
+  await page.route("**/openai/v1/realtime/calls", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/sdp", body: "answer-sdp" })
   })
 
   await page.goto("/plan")
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
   await page.getByRole("button", { name: "Start voice input" }).first().click()
+  await expect(page.getByText("Listening", { exact: true })).toBeVisible()
+
+  await page.evaluate(() => {
+    const channel = (globalThis as Record<string, { emit: (event: Record<string, unknown>) => void }>).__voyageDataChannel
+    channel.emit({
+      type: "conversation.item.input_audio_transcription.completed",
+      transcript: "Plan a trip to Seoul",
+    })
+  })
+  await page.getByRole("button", { name: "Details" }).click()
+  await expect(page.getByText("Plan a trip to Seoul").last()).toBeVisible()
+
   await expect(page.getByRole("button", { name: "Stop voice input" }).first()).toBeVisible()
   await page.getByRole("button", { name: "Stop voice input" }).first().click()
-
-  await expect(page.getByPlaceholder("Ask Voyage anything...")).toHaveValue("Plan a trip to Seoul")
+  await expect(page.getByRole("button", { name: "Start voice input" }).first()).toBeVisible()
 })
 
 test("filters stays and adds one to the itinerary", async ({ page }) => {
