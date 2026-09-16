@@ -48,7 +48,7 @@ export async function POST() {
             ? { input: { transcription: { model: transcriptionDeployment } } }
             : undefined,
           instructions:
-            "You are Voyage, a concise and helpful travel planning assistant. Keep spoken responses brief and conversational.",
+            "You are Voyage, a concise and helpful travel planning assistant. Keep spoken responses brief and conversational. When a destination is chosen, keep the user on the planner and ask for confirmed check-in/check-out dates and traveler count. Only open the stays page after both dates and travelers have been confirmed. Never skip directly from destination selection to stays.",
         },
       }),
     })

@@ -11,6 +11,7 @@ import { formatDateRange, formatPrice } from "@/lib/voyage-data"
 import { executeWebMcpTool, getWebMcpTools } from "@/lib/webmcp/client"
 import {
   createRealtimeVoiceSession,
+  type RealtimeToolCall,
   type RealtimeVoiceEvent,
   type RealtimeVoiceStatus,
 } from "@/lib/realtime/realtime-client"
@@ -37,6 +38,12 @@ type ConversationMessage = {
   role: "user" | "assistant"
   content: string
   streaming?: boolean
+}
+
+type VoiceConfirmationExecution = {
+  toolName: "book_itinerary" | "cancel_booking"
+  promise: Promise<Record<string, unknown>>
+  expiresAt: number
 }
 
 export function SiteShell({
@@ -195,8 +202,16 @@ function VoyageCommandDock({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const realtimeAudioRef = useRef<HTMLAudioElement>(null)
   const realtimeSessionRef = useRef<ReturnType<typeof createRealtimeVoiceSession> | null>(null)
-  const conversationEndRef = useRef<HTMLDivElement>(null)
   const { state } = useVoyage()
+  const stateRef = useRef(state)
+  const bookingSummaryRef = useRef(bookingSummary)
+  const cancellationSummaryRef = useRef(cancellationSummary)
+  const pendingVoiceConfirmationRef = useRef<"booking" | "cancellation" | null>(null)
+  const voiceConfirmationExecutionRef = useRef<VoiceConfirmationExecution | null>(null)
+  const conversationEndRef = useRef<HTMLDivElement>(null)
+  stateRef.current = state
+  bookingSummaryRef.current = bookingSummary
+  cancellationSummaryRef.current = cancellationSummary
   const router = useRouter()
 
   useEffect(() => {
@@ -362,6 +377,7 @@ function VoyageCommandDock({
                     setBookingSummary(summaryResult.summary)
                     setBookingError(null)
                     setDetailsOpen(true)
+                    router.push("/itinerary")
                   }
                 }
               } catch (error: unknown) {
@@ -424,6 +440,93 @@ function VoyageCommandDock({
     }
   }
 
+  async function executeRealtimeTool(call: RealtimeToolCall, tools: AgentTool[]) {
+    const toolName = call.name
+
+    const activeConfirmation = voiceConfirmationExecutionRef.current
+    if (activeConfirmation && activeConfirmation.expiresAt <= Date.now()) {
+      voiceConfirmationExecutionRef.current = null
+    } else if (activeConfirmation?.toolName === toolName) {
+      const result = await activeConfirmation.promise
+      if (voiceConfirmationExecutionRef.current === activeConfirmation) {
+        voiceConfirmationExecutionRef.current = null
+      }
+      return result
+    }
+
+    if (toolName === "book_itinerary") {
+      const summaryTool = tools.find((tool) => tool.name === "get_booking_summary")
+      if (summaryTool) {
+        const summaryResult = (await executeWebMcpTool(summaryTool, {})) as {
+          ok?: boolean
+          summary?: BookingSummary
+          message?: string
+        }
+        if (!summaryResult.ok) return summaryResult
+        if (summaryResult.summary) {
+          bookingSummaryRef.current = summaryResult.summary
+          pendingVoiceConfirmationRef.current = "booking"
+          setBookingSummary(summaryResult.summary)
+          setBookingError(null)
+          setDetailsOpen(true)
+          router.push("/itinerary")
+        }
+      }
+      return {
+        ok: false,
+        code: "USER_CONFIRMATION_REQUIRED",
+        message: "The booking summary is ready. Ask the user to say confirm, or use the confirmation button, before booking.",
+      }
+    }
+
+    if (toolName === "cancel_booking") {
+      const booking = stateRef.current.bookedItinerary
+      if (!booking) {
+        return {
+          ok: false,
+          code: "ACTIVE_BOOKING_NOT_FOUND",
+          message: "There is no active booking to cancel.",
+        }
+      }
+      setCancellationSummary(booking)
+      cancellationSummaryRef.current = booking
+      pendingVoiceConfirmationRef.current = "cancellation"
+      setBookingError(null)
+      setDetailsOpen(true)
+      return {
+        ok: false,
+        code: "USER_CONFIRMATION_REQUIRED",
+        message: "The cancellation summary is ready. Ask the user to say confirm, or use the confirmation button, before cancelling.",
+      }
+    }
+
+    const tool = tools.find((item) => item.name === toolName)
+    if (!tool) {
+      return {
+        ok: false,
+        code: "TOOL_NOT_FOUND",
+        message: `The ${toolName} tool is unavailable.`,
+      }
+    }
+
+    const result = await executeWebMcpTool(tool, call.arguments)
+    if (toolName === "get_booking_summary") {
+      const summaryResult = result as {
+        ok?: boolean
+        summary?: BookingSummary
+      }
+      if (summaryResult.ok && summaryResult.summary) {
+        bookingSummaryRef.current = summaryResult.summary
+        pendingVoiceConfirmationRef.current = "booking"
+        setBookingSummary(summaryResult.summary)
+        setBookingError(null)
+        setDetailsOpen(true)
+        router.push("/itinerary")
+      }
+    }
+    return result
+  }
+
   async function toggleVoiceInput() {
     if (isThinking) return
     if (isRealtimeVoiceActive(voiceStatus)) {
@@ -438,9 +541,24 @@ function VoyageCommandDock({
     }
 
     setVoiceError(null)
+    let tools = availableTools
+    if (tools.length === 0) {
+      try {
+        tools = await getWebMcpTools()
+        setAvailableTools(tools)
+        setToolStatus("connected")
+      } catch (error: unknown) {
+        setToolStatus("unavailable")
+        setToolError(
+          error instanceof Error ? error.message : "WebMCP is unavailable.",
+        )
+      }
+    }
+
     const session = createRealtimeVoiceSession(realtimeAudioRef.current, {
       onStatusChange: setVoiceStatus,
       onError: setVoiceError,
+      onToolCall: (call) => executeRealtimeTool(call, tools),
       onEvent: (event: RealtimeVoiceEvent) => {
         if (event.type === "user-speech-started") {
           setConversation((current) => {
@@ -451,6 +569,25 @@ function VoyageCommandDock({
             return [...current, { role: "user", content: "", streaming: true }]
           })
           return
+        }
+
+        if (event.type === "user-transcript") {
+          const pending = pendingVoiceConfirmationRef.current
+          if (pending && isAffirmativeReply(event.text)) {
+            pendingVoiceConfirmationRef.current = null
+            if (pending === "booking") {
+              startVoiceConfirmation("book_itinerary", tools)
+            } else {
+              startVoiceConfirmation("cancel_booking", tools)
+            }
+          } else if (pending && isNegativeReply(event.text)) {
+            pendingVoiceConfirmationRef.current = null
+            bookingSummaryRef.current = null
+            cancellationSummaryRef.current = null
+            setBookingSummary(null)
+            setCancellationSummary(null)
+            setBookingError(null)
+          }
         }
 
         const isUserTranscript = event.type.startsWith("user-transcript")
@@ -490,18 +627,65 @@ function VoyageCommandDock({
     realtimeSessionRef.current = session
 
     try {
-      await session.connect()
+      await session.connect(tools)
     } catch {
       realtimeSessionRef.current = null
     }
   }
 
-  async function confirmBooking() {
-    if (isThinking) return
-    const tool = availableTools.find((item) => item.name === "book_itinerary")
+  function announceRealtimeAction(message: string) {
+    const session = realtimeSessionRef.current
+    if (!session) return false
+
+    try {
+      session.sendEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: message }],
+        },
+      })
+      session.sendEvent({ type: "response.create" })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  function startVoiceConfirmation(
+    toolName: VoiceConfirmationExecution["toolName"],
+    tools: AgentTool[],
+  ) {
+    const promise = toolName === "book_itinerary"
+      ? confirmBooking(tools)
+      : confirmCancellation(tools)
+    const execution: VoiceConfirmationExecution = {
+      toolName,
+      promise,
+      expiresAt: Date.now() + 10_000,
+    }
+    voiceConfirmationExecutionRef.current = execution
+    void promise.then(
+      () => {
+        execution.expiresAt = Date.now() + 3_000
+      },
+      () => {
+        execution.expiresAt = 0
+      },
+    )
+  }
+
+  async function confirmBooking(toolsOverride?: AgentTool[]): Promise<Record<string, unknown>> {
+    if (isThinking) {
+      return { ok: false, code: "CONFIRMATION_IN_PROGRESS", message: "The booking confirmation is already being processed." }
+    }
+    const tool = (toolsOverride ?? availableTools).find(
+      (item) => item.name === "book_itinerary",
+    )
     if (!tool) {
       setBookingError("The booking tool is unavailable.")
-      return
+      return { ok: false, code: "TOOL_NOT_FOUND", message: "The booking tool is unavailable." }
     }
 
     setIsThinking(true)
@@ -518,41 +702,53 @@ function VoyageCommandDock({
         throw new Error(result.message ?? "The booking could not be completed.")
 
       setBookingSummary(null)
-      setConversation((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: `Your journey is confirmed${
-            result.booking?.reference ? ` · ${result.booking.reference}` : "."
-          }`,
-        },
-      ])
-      onClose()
-      router.push("/trips")
+      bookingSummaryRef.current = null
+      pendingVoiceConfirmationRef.current = null
+      const confirmationMessage = `The booking is confirmed${
+        result.booking?.reference ? ` · ${result.booking.reference}` : "."
+      }`
+      if (!announceRealtimeAction(confirmationMessage)) {
+        setConversation((current) => [
+          ...current,
+          { role: "assistant", content: confirmationMessage },
+        ])
+      }
+      return result
     } catch (error: unknown) {
-      setBookingError(
+      const message =
         error instanceof Error
           ? error.message
-          : "The booking could not be completed.",
+          : "The booking could not be completed."
+      setBookingError(
+        message,
       )
+      return { ok: false, code: "BOOKING_FAILED", message }
     } finally {
       setIsThinking(false)
     }
   }
 
-  async function confirmCancellation() {
-    if (isThinking || !cancellationSummary) return
-    const tool = availableTools.find((item) => item.name === "cancel_booking")
+  async function confirmCancellation(toolsOverride?: AgentTool[]): Promise<Record<string, unknown>> {
+    const summary = cancellationSummaryRef.current ?? cancellationSummary
+    if (isThinking) {
+      return { ok: false, code: "CONFIRMATION_IN_PROGRESS", message: "The cancellation confirmation is already being processed." }
+    }
+    if (!summary) {
+      return { ok: false, code: "ACTIVE_BOOKING_NOT_FOUND", message: "There is no active booking to cancel." }
+    }
+    const tool = (toolsOverride ?? availableTools).find(
+      (item) => item.name === "cancel_booking",
+    )
     if (!tool) {
       setBookingError("The cancellation tool is unavailable.")
-      return
+      return { ok: false, code: "TOOL_NOT_FOUND", message: "The cancellation tool is unavailable." }
     }
 
     setIsThinking(true)
     setBookingError(null)
     try {
       const result = (await executeWebMcpTool(tool, {
-        bookingReference: cancellationSummary.reference,
+        bookingReference: summary.reference,
         confirmation: "confirmed",
       })) as {
         ok?: boolean
@@ -563,23 +759,27 @@ function VoyageCommandDock({
         throw new Error(result.message ?? "The booking could not be cancelled.")
 
       setCancellationSummary(null)
-      setConversation((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: `Your booking has been cancelled${
-            result.booking?.reference ? ` · ${result.booking.reference}` : "."
-          }`,
-        },
-      ])
-      onClose()
-      router.push("/trips")
+      cancellationSummaryRef.current = null
+      pendingVoiceConfirmationRef.current = null
+      const confirmationMessage = `The booking has been cancelled${
+        result.booking?.reference ? ` · ${result.booking.reference}` : "."
+      }`
+      if (!announceRealtimeAction(confirmationMessage)) {
+        setConversation((current) => [
+          ...current,
+          { role: "assistant", content: confirmationMessage },
+        ])
+      }
+      return result
     } catch (error: unknown) {
-      setBookingError(
+      const message =
         error instanceof Error
           ? error.message
-          : "The booking could not be cancelled.",
+          : "The booking could not be cancelled."
+      setBookingError(
+        message,
       )
+      return { ok: false, code: "CANCELLATION_FAILED", message }
     } finally {
       setIsThinking(false)
     }
@@ -676,8 +876,8 @@ function VoyageCommandDock({
             {isThinking && <p className="border-l-2 border-gold pl-3 text-xs text-taupe">Voyage is thinking…</p>}
             <div ref={conversationEndRef} aria-hidden="true" />
           </div>
-          {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { setBookingSummary(null); setBookingError(null) }} />}
-          {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { setCancellationSummary(null); setBookingError(null) }} />}
+          {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { pendingVoiceConfirmationRef.current = null; bookingSummaryRef.current = null; setBookingSummary(null); setBookingError(null) }} />}
+          {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { pendingVoiceConfirmationRef.current = null; cancellationSummaryRef.current = null; setCancellationSummary(null); setBookingError(null) }} />}
           {toolError && <p className="mt-3 text-xs text-red-900">{toolError}</p>}
           <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-taupe">Azure OpenAI · WebMCP tools · local travel data</p>
         </div>}

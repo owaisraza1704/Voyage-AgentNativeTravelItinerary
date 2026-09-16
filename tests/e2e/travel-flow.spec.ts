@@ -28,6 +28,21 @@ test("allows a traveler to choose a destination and dates", async ({ page }) => 
 test("connects the realtime microphone session and receives transcript events", async ({ page }) => {
   await page.addInitScript(() => {
     const tracks = [{ stop() {} }]
+    const tripContextTool = {
+      name: "get_trip_context",
+      description: "Read the current Voyage trip.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    }
+    ;(globalThis as Record<string, unknown>).__voyageSentEvents = []
+    Object.defineProperty(document, "modelContext", {
+      configurable: true,
+      value: {
+        getTools: async () => [tripContextTool],
+        executeTool: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ ok: true, trip: {} }) }],
+        }),
+      },
+    })
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: { getUserMedia: async () => ({ getTracks: () => tracks }) },
@@ -48,7 +63,9 @@ test("connects the realtime microphone session and receives transcript events", 
         this.onopen?.()
       }
 
-      send() {}
+      send(value: string) {
+        ;(globalThis as Record<string, unknown[]>).__voyageSentEvents.push(JSON.parse(value))
+      }
       close() { this.readyState = "closed" }
       emit(event: Record<string, unknown>) {
         this.onmessage?.({ data: JSON.stringify(event) })
@@ -104,6 +121,10 @@ test("connects the realtime microphone session and receives transcript events", 
   await page.getByRole("button", { name: "Talk to Voyage" }).click()
   await page.getByRole("button", { name: "Start voice input" }).first().click()
   await expect(page.getByText("Listening", { exact: true })).toBeVisible()
+  await expect.poll(async () => page.evaluate(() => {
+    const events = (globalThis as Record<string, Array<Record<string, unknown>>>).__voyageSentEvents
+    return events.some((event) => event.type === "session.update")
+  })).toBe(true)
 
   await page.evaluate(() => {
     const channel = (globalThis as Record<string, { emit: (event: Record<string, unknown>) => void }>).__voyageDataChannel
@@ -126,7 +147,17 @@ test("connects the realtime microphone session and receives transcript events", 
       type: "conversation.item.input_audio_transcription.completed",
       transcript: "Plan a trip to Seoul",
     })
+    channel.emit({
+      type: "response.function_call_arguments.done",
+      call_id: "call_trip_context",
+      name: "get_trip_context",
+      arguments: "{}",
+    })
   })
+  await expect.poll(async () => page.evaluate(() => {
+    const events = (globalThis as Record<string, Array<Record<string, unknown>>>).__voyageSentEvents
+    return events.some((event) => event.type === "conversation.item.create")
+  })).toBe(true)
   await page.getByRole("button", { name: "Details" }).click()
   await expect(page.getByText("Plan a trip to Seoul", { exact: true }).last()).toBeVisible()
   await expect(page.locator(".bg-mist p.border-l-2")).toHaveText([

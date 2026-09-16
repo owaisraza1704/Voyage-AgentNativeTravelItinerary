@@ -1,3 +1,5 @@
+import type { AgentTool } from "@/lib/agent-types"
+
 export type RealtimeVoiceStatus =
   | "idle"
   | "connecting"
@@ -19,6 +21,13 @@ export type RealtimeVoiceHandlers = {
   onStatusChange?: (status: RealtimeVoiceStatus) => void
   onEvent?: (event: RealtimeVoiceEvent) => void
   onError?: (message: string) => void
+  onToolCall?: (call: RealtimeToolCall) => Promise<unknown>
+}
+
+export type RealtimeToolCall = {
+  callId: string
+  name: string
+  arguments: Record<string, unknown>
 }
 
 type RealtimeSessionResponse = {
@@ -104,6 +113,7 @@ export function createRealtimeVoiceSession(
   let dataChannel: RTCDataChannel | null = null
   let mediaStream: MediaStream | null = null
   let intentionallyClosed = false
+  let tools: AgentTool[] = []
 
   function setStatus(status: RealtimeVoiceStatus) {
     handlers.onStatusChange?.(status)
@@ -142,9 +152,93 @@ export function createRealtimeVoiceSession(
     audioElement.srcObject = null
   }
 
-  async function connect() {
+  function sendToolDefinitions() {
+    if (tools.length === 0) return
+
+    sendEvent({
+      type: "session.update",
+      session: {
+        type: "realtime",
+        tools: tools.map((tool) => {
+          let parameters = tool.inputSchema
+          if (typeof parameters === "string") {
+            try {
+              parameters = JSON.parse(parameters) as Record<string, unknown>
+            } catch {
+              parameters = undefined
+            }
+          }
+
+          return {
+            type: "function",
+            name: tool.name,
+            description: tool.description ?? "Voyage travel tool.",
+            parameters: parameters ?? {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+          }
+        }),
+      },
+    })
+  }
+
+  async function handleToolCall(event: Record<string, unknown>) {
+    const callId =
+      typeof event.call_id === "string"
+        ? event.call_id
+        : typeof (event.item as { call_id?: unknown } | undefined)?.call_id ===
+            "string"
+          ? ((event.item as { call_id: string }).call_id)
+          : undefined
+    const name = typeof event.name === "string" ? event.name : undefined
+    const rawArguments =
+      typeof event.arguments === "string" ? event.arguments : "{}"
+
+    if (!callId || !name) return
+
+    let output: unknown
+    try {
+      const parsedArguments = JSON.parse(rawArguments) as unknown
+      if (
+        !parsedArguments ||
+        typeof parsedArguments !== "object" ||
+        Array.isArray(parsedArguments)
+      ) {
+        throw new Error("Tool arguments must be a JSON object.")
+      }
+      output = handlers.onToolCall
+        ? await handlers.onToolCall({
+            callId,
+            name,
+            arguments: parsedArguments as Record<string, unknown>,
+          })
+        : { ok: false, code: "TOOL_HANDLER_UNAVAILABLE" }
+    } catch (error: unknown) {
+      output = {
+        ok: false,
+        code: "TOOL_EXECUTION_FAILED",
+        message:
+          error instanceof Error ? error.message : "The voice tool failed.",
+      }
+    }
+
+    sendEvent({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: callId,
+        output: JSON.stringify(output),
+      },
+    })
+    sendEvent({ type: "response.create" })
+  }
+
+  async function connect(nextTools: AgentTool[] = []) {
     if (peerConnection) return
     intentionallyClosed = false
+    tools = nextTools
     setStatus("connecting")
 
     try {
@@ -188,10 +282,18 @@ export function createRealtimeVoiceSession(
       }
 
       dataChannel = peerConnection.createDataChannel("oai-events")
-      dataChannel.onopen = () => setStatus("listening")
+      dataChannel.onopen = () => {
+        setStatus("listening")
+        sendToolDefinitions()
+      }
       dataChannel.onmessage = (event) => {
         try {
-          emitServerEvent(JSON.parse(event.data) as unknown)
+          const value = JSON.parse(event.data) as Record<string, unknown>
+          if (value.type === "response.function_call_arguments.done") {
+            void handleToolCall(value)
+            return
+          }
+          emitServerEvent(value)
         } catch {
           handlers.onError?.("The Realtime session sent an invalid event.")
         }

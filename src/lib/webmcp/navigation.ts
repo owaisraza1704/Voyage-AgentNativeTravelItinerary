@@ -1,4 +1,5 @@
 export const voyagePagePaths = {
+  explore: "/explore",
   planner: "/plan",
   stays: "/stays",
   itinerary: "/itinerary",

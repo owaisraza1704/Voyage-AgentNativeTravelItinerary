@@ -36,13 +36,13 @@ function createTestApi() {
   const actions = {
     getSnapshot: () => snapshot,
     setDestination: vi.fn((destinationId: string) => {
-      snapshot = { ...snapshot, state: { ...snapshot.state, destinationId }, destination: getDestination(destinationId) }
+      snapshot = { ...snapshot, state: { ...snapshot.state, destinationId, datesConfirmed: false, travelersConfirmed: false }, destination: getDestination(destinationId) }
     }),
     setDates: vi.fn((startDate: string, endDate: string) => {
-      snapshot = { ...snapshot, state: { ...snapshot.state, startDate, endDate }, nights: 6 }
+      snapshot = { ...snapshot, state: { ...snapshot.state, startDate, endDate, datesConfirmed: true }, nights: 6 }
     }),
     setTravelers: vi.fn((adults: number, children: number) => {
-      snapshot = { ...snapshot, state: { ...snapshot.state, adults, children } }
+      snapshot = { ...snapshot, state: { ...snapshot.state, adults, children, travelersConfirmed: true } }
     }),
     navigate: vi.fn(),
     selectHotel: vi.fn((hotelId: string) => {
@@ -70,8 +70,10 @@ function createSnapshot(): VoyageContextValue {
       destinationId: "paris",
       startDate: "2026-09-12",
       endDate: "2026-09-18",
+      datesConfirmed: false,
       adults: 2,
       children: 0,
+      travelersConfirmed: false,
       selectedHotelId: null,
       bookingStatus: "draft",
       bookingReference: null,
@@ -117,6 +119,7 @@ describe("Voyage WebMCP tools", () => {
 
     expect([...registeredTools.keys()]).toEqual([
       "get_trip_context",
+      "list_destinations",
       "search_destinations",
       "get_destination",
       "set_destination",
@@ -145,6 +148,32 @@ describe("Voyage WebMCP tools", () => {
     expect((await readTool(tool, { destinationId: "seoul" })).ok).toBe(true)
     expect(actions.setDestination).toHaveBeenCalledWith("seoul")
     expect((await readTool(tool, { destinationId: "unknown" })).code).toBe("DESTINATION_NOT_FOUND")
+  })
+
+  it("lists every available destination", async () => {
+    const { registeredTools } = await setup()
+    const response = await readTool(registeredTools.get("list_destinations")!)
+
+    expect(response.destinations.map((destination: { name: string }) => destination.name)).toEqual([
+      "Paris",
+      "Tokyo",
+      "Dubai",
+      "Kyoto",
+      "London",
+      "Singapore",
+      "Rome",
+      "Istanbul",
+      "New York",
+      "Barcelona",
+      "Lisbon",
+      "Cape Town",
+      "Bali",
+      "Amsterdam",
+      "Marrakech",
+      "Vienna",
+      "Sydney",
+      "Seoul",
+    ])
   })
 
   it("blocks itinerary changes while a booking is active", async () => {
@@ -199,6 +228,15 @@ describe("Voyage WebMCP tools", () => {
   it("navigates only to allowlisted Voyage pages", async () => {
     const { actions, registeredTools } = await setup()
     const tool = registeredTools.get("navigate_to")!
+
+    expect((await readTool(tool, { page: "stays" })).code).toBe("TRIP_DETAILS_REQUIRED")
+    expect(actions.navigate).not.toHaveBeenCalled()
+
+    await readTool(registeredTools.get("set_trip_dates")!, {
+      startDate: "2026-09-19",
+      endDate: "2026-09-26",
+    })
+    await readTool(registeredTools.get("set_travelers")!, { adults: 2 })
 
     expect(await readTool(tool, { page: "stays" })).toMatchObject({
       ok: true,

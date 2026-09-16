@@ -67,8 +67,17 @@ function staySummary(hotel: NonNullable<ReturnType<typeof getHotel>>, nights: nu
 function tripSummary(snapshot: VoyageContextValue) {
   return {
     destination: snapshot.destination ? { id: snapshot.destination.id, name: snapshot.destination.name, country: snapshot.destination.country } : null,
-    dates: { startDate: snapshot.state.startDate, endDate: snapshot.state.endDate, nights: snapshot.nights },
-    travelers: { adults: snapshot.state.adults, children: snapshot.state.children },
+    dates: {
+      startDate: snapshot.state.startDate,
+      endDate: snapshot.state.endDate,
+      nights: snapshot.nights,
+      confirmed: snapshot.state.datesConfirmed,
+    },
+    travelers: {
+      adults: snapshot.state.adults,
+      children: snapshot.state.children,
+      confirmed: snapshot.state.travelersConfirmed,
+    },
     filters: snapshot.state.filters,
     sort: snapshot.state.sortOption,
     selectedStay: snapshot.selectedHotel ? staySummary(snapshot.selectedHotel, snapshot.nights) : null,
@@ -119,6 +128,15 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
       execute: () => result({ ok: true, trip: tripSummary(actions.getSnapshot()) }),
     },
     {
+      name: "list_destinations",
+      description: "List every destination available in Voyage. Use this when the user asks what places, destinations, or options they can choose from.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      execute: () => result({
+        ok: true,
+        destinations: destinations.map(({ id, name, country, tagline, description }) => ({ id, name, country, tagline, description })),
+      }),
+    },
+    {
       name: "search_destinations",
       description: "Find Voyage destinations by name, country, tagline, or description.",
       inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false },
@@ -141,7 +159,7 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
     },
     {
       name: "set_destination",
-      description: "Set the destination for the current Voyage trip.",
+      description: "Set the destination for the current Voyage trip. After this, keep the user on the planner and collect confirmed dates and travelers before opening stays.",
       inputSchema: { type: "object", properties: { destinationId: { type: "string" } }, required: ["destinationId"], additionalProperties: false },
       execute: (rawInput) => {
         const blocked = activeBookingGuard(actions.getSnapshot(), "change the destination")
@@ -186,11 +204,19 @@ export async function registerVoyageTools(modelContext: ModelContext, actions: V
     },
     {
       name: "navigate_to",
-      description: "Show the user the relevant Voyage page after changing or reviewing trip state.",
+      description: "Show the user the relevant Voyage page after changing or reviewing trip state. Only navigate to stays after dates and travelers have both been confirmed; otherwise remain on the planner and ask for the missing details.",
       inputSchema: { type: "object", properties: { page: { type: "string", enum: Object.keys(voyagePagePaths) } }, required: ["page"], additionalProperties: false },
       execute: (rawInput) => {
         const page = inputString(inputObject(rawInput), "page")
-        if (!page || !(page in voyagePagePaths)) return result({ ok: false, code: "INVALID_PAGE", message: "Use planner, stays, itinerary, or trips." })
+        if (!page || !(page in voyagePagePaths)) return result({ ok: false, code: "INVALID_PAGE", message: "Use explore, planner, stays, itinerary, or trips." })
+        const snapshot = actions.getSnapshot()
+        if (page === "stays" && (!snapshot.state.datesConfirmed || !snapshot.state.travelersConfirmed)) {
+          return result({
+            ok: false,
+            code: "TRIP_DETAILS_REQUIRED",
+            message: "Stay browsing is not ready yet. Keep the user on the planner and confirm both travel dates and traveler count before opening stays.",
+          })
+        }
         actions.navigate(page as VoyagePage)
         return result({ ok: true, page, path: voyagePagePaths[page as VoyagePage] })
       },

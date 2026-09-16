@@ -23,8 +23,10 @@ export type TripState = {
   destinationId: string;
   startDate: string;
   endDate: string;
+  datesConfirmed: boolean;
   adults: number;
   children: number;
+  travelersConfirmed: boolean;
   selectedHotelId: string | null;
   bookingStatus: "draft" | "confirmed";
   bookingReference: string | null;
@@ -55,8 +57,10 @@ const initialState: TripState = {
   destinationId: "paris",
   startDate: "2026-09-14",
   endDate: "2026-09-18",
+  datesConfirmed: false,
   adults: 2,
   children: 0,
+  travelersConfirmed: false,
   selectedHotelId: null,
   bookingStatus: "draft",
   bookingReference: null,
@@ -73,6 +77,8 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         ...state,
         destinationId: action.destinationId,
         selectedHotelId: null,
+        datesConfirmed: false,
+        travelersConfirmed: false,
         bookingStatus: "draft",
         bookingReference: null,
         filters: createDefaultStayFilters(),
@@ -83,6 +89,7 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         ...state,
         startDate: action.startDate,
         endDate: action.endDate,
+        datesConfirmed: true,
         bookingStatus: "draft",
         bookingReference: null,
       };
@@ -91,6 +98,7 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         ...state,
         adults: action.adults,
         children: action.children,
+        travelersConfirmed: true,
         bookingStatus: "draft",
         bookingReference: null,
       };
@@ -133,6 +141,8 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         endDate: action.activeBooking?.endDate ?? state.endDate,
         adults: action.activeBooking?.adults ?? state.adults,
         children: action.activeBooking?.children ?? state.children,
+        datesConfirmed: action.activeBooking ? true : state.datesConfirmed,
+        travelersConfirmed: action.activeBooking ? true : state.travelersConfirmed,
         bookingStatus: action.activeBooking ? "confirmed" : "draft",
         bookingReference: action.activeBooking?.reference ?? null,
       };
@@ -143,8 +153,10 @@ function tripReducer(state: TripState, action: TripAction): TripState {
         destinationId: action.booking.destinationId,
         startDate: action.booking.startDate,
         endDate: action.booking.endDate,
+        datesConfirmed: true,
         adults: action.booking.adults,
         children: action.booking.children,
+        travelersConfirmed: true,
         bookingStatus: "confirmed",
         bookingReference: action.booking.reference,
         bookedItinerary: action.booking,
@@ -159,6 +171,8 @@ function tripReducer(state: TripState, action: TripAction): TripState {
       return {
         ...state,
         selectedHotelId: null,
+        datesConfirmed: false,
+        travelersConfirmed: false,
         bookingStatus: "draft",
         bookingReference: null,
         bookedItinerary: null,
