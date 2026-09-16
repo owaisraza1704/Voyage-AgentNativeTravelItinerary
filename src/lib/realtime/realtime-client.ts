@@ -114,6 +114,8 @@ export function createRealtimeVoiceSession(
   let mediaStream: MediaStream | null = null
   let intentionallyClosed = false
   let tools: AgentTool[] = []
+  let responseActive = false
+  let responseRequested = false
 
   function setStatus(status: RealtimeVoiceStatus) {
     handlers.onStatusChange?.(status)
@@ -121,6 +123,19 @@ export function createRealtimeVoiceSession(
 
   function emitServerEvent(value: unknown) {
     const event = value as { type?: unknown; error?: { message?: unknown } }
+    if (event.type === "response.created") responseActive = true
+    if (
+      event.type === "response.done" ||
+      event.type === "response.cancelled" ||
+      event.type === "response.failed"
+    ) {
+      responseActive = false
+      if (responseRequested) {
+        responseRequested = false
+        requestResponse()
+      }
+    }
+
     if (event.type === "error") {
       const message =
         typeof event.error?.message === "string"
@@ -232,7 +247,7 @@ export function createRealtimeVoiceSession(
         output: JSON.stringify(output),
       },
     })
-    sendEvent({ type: "response.create" })
+    requestResponse()
   }
 
   async function connect(nextTools: AgentTool[] = []) {
@@ -352,5 +367,14 @@ export function createRealtimeVoiceSession(
     dataChannel.send(JSON.stringify(event))
   }
 
-  return { connect, close, sendEvent }
+  function requestResponse() {
+    if (responseActive) {
+      responseRequested = true
+      return
+    }
+    sendEvent({ type: "response.create" })
+    responseActive = true
+  }
+
+  return { connect, close, sendEvent, requestResponse }
 }

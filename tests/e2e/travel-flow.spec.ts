@@ -166,8 +166,12 @@ test("connects the realtime microphone session and receives transcript events", 
   ])
 
   await expect(page.getByRole("button", { name: "Stop voice input" }).first()).toBeVisible()
-  await page.getByRole("button", { name: "Stop voice input" }).first().click()
+  await page.getByRole("button", { name: "Close Voyage dock" }).click()
+  await expect(page.getByRole("dialog", { name: "Voyage command dock" })).not.toBeVisible()
+  await page.getByRole("button", { name: "Talk to Voyage" }).click()
   await expect(page.getByRole("button", { name: "Start voice input" }).first()).toBeVisible()
+  await page.getByRole("button", { name: "Start voice input" }).first().click()
+  await expect(page.getByText("Listening", { exact: true })).toBeVisible()
 })
 
 test("filters stays and adds one to the itinerary", async ({ page }) => {

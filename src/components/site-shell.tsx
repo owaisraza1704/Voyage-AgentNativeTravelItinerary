@@ -209,6 +209,7 @@ function VoyageCommandDock({
   const pendingVoiceConfirmationRef = useRef<"booking" | "cancellation" | null>(null)
   const voiceConfirmationExecutionRef = useRef<VoiceConfirmationExecution | null>(null)
   const conversationEndRef = useRef<HTMLDivElement>(null)
+  const confirmationCardRef = useRef<HTMLDivElement>(null)
   stateRef.current = state
   bookingSummaryRef.current = bookingSummary
   cancellationSummaryRef.current = cancellationSummary
@@ -242,10 +243,20 @@ function VoyageCommandDock({
   }, [])
 
   useEffect(() => {
+    if (open) return
+    realtimeSessionRef.current?.close()
+    realtimeSessionRef.current = null
+    setVoiceStatus("idle")
+  }, [open])
+
+  useEffect(() => {
     if (!open) return
 
     const frame = window.requestAnimationFrame(() => {
-      conversationEndRef.current?.scrollIntoView({
+      const scrollTarget = bookingSummary || cancellationSummary
+        ? confirmationCardRef.current
+        : conversationEndRef.current
+      scrollTarget?.scrollIntoView({
         behavior: "smooth",
         block: "end",
       })
@@ -646,7 +657,7 @@ function VoyageCommandDock({
           content: [{ type: "input_text", text: message }],
         },
       })
-      session.sendEvent({ type: "response.create" })
+      session.requestResponse()
       return true
     } catch {
       return false
@@ -876,8 +887,10 @@ function VoyageCommandDock({
             {isThinking && <p className="border-l-2 border-gold pl-3 text-xs text-taupe">Voyage is thinking…</p>}
             <div ref={conversationEndRef} aria-hidden="true" />
           </div>
-          {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { pendingVoiceConfirmationRef.current = null; bookingSummaryRef.current = null; setBookingSummary(null); setBookingError(null) }} />}
-          {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { pendingVoiceConfirmationRef.current = null; cancellationSummaryRef.current = null; setCancellationSummary(null); setBookingError(null) }} />}
+          {(bookingSummary || cancellationSummary) && <div ref={confirmationCardRef}>
+            {bookingSummary && <BookingConfirmationCard summary={bookingSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmBooking()} onKeepPlanning={() => { pendingVoiceConfirmationRef.current = null; bookingSummaryRef.current = null; setBookingSummary(null); setBookingError(null) }} />}
+            {cancellationSummary && <CancellationConfirmationCard booking={cancellationSummary} bookingError={bookingError} disabled={isThinking} onConfirm={() => void confirmCancellation()} onKeepPlanning={() => { pendingVoiceConfirmationRef.current = null; cancellationSummaryRef.current = null; setCancellationSummary(null); setBookingError(null) }} />}
+          </div>}
           {toolError && <p className="mt-3 text-xs text-red-900">{toolError}</p>}
           <p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-taupe">Azure OpenAI · WebMCP tools · local travel data</p>
         </div>}
